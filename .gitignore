@@ -1,0 +1,92 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+.venv
+.pytest_cache/
+__pycache__/
+*.py[cod]
+models/
+backups/
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# Python environments and test/type-check caches
+.venv/
+venv/
+.mypy_cache/
+.ruff_cache/
+.pyright/
+
+# Local AI models and voice assets
+models/
+*.onnx
+*.safetensors
+*.gguf
+*.pth
+*.pt
+*.bin
+
+# Generated lessons and temporary render outputs
+output/videos/
+output/inspection/
+output/audio/
+output/tmp/
+*.wav
+
+# Local runtime data
+*.sqlite
+*.sqlite3
+*.db
+
+# Build and test outputs
+coverage/
+playwright-report/
+test-results/
+
+# Generated output and temporary test files
+output/pytest-tmp/
+output/pytest-run/
+output/videos/
+output/inspection/
+output/audio/
+output/tmp/
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Local AI model weights
+*.onnx
+*.safetensors
+*.gguf
+*.pth
+*.pt
+
+# Additional caches
+.mypy_cache/
+.ruff_cache/
