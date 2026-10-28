@@ -1,8 +1,8 @@
 """Local IndicTrans2 translation of English lesson text into Indian-language scripts.
 
 The lesson is always planned in English; this service translates scene titles,
-narration, captions, whitelisted visual_data values, and bounded cause/effect
-labels afterwards. Code and execution_data are never translated.
+narration, captions, whitelisted visual_data values, and bounded visual labels
+afterwards. Code, numeric state, and equation expressions stay intact.
 """
 
 from __future__ import annotations
@@ -13,7 +13,13 @@ import re
 import time
 from pathlib import Path
 
-from backend.schemas import CauseEffectData, Lesson
+from backend.schemas import (
+    CauseEffectData,
+    CycleData,
+    EquationStepsData,
+    Lesson,
+    NumberLineData,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -33,7 +39,19 @@ MAX_SENTENCE_CHARACTERS = 420
 # Only these visual_data keys carry learner-facing prose; everything else
 # (code snippets, technical labels) stays exactly as the planner wrote it.
 TRANSLATABLE_VISUAL_KEYS = frozenset(
-    {"topic", "subtitle", "purpose", "left", "right", "relationship", "input", "process", "output"}
+    {
+        "topic",
+        "subtitle",
+        "purpose",
+        "left",
+        "right",
+        "relationship",
+        "input",
+        "process",
+        "step_2",
+        "step_3",
+        "output",
+    }
 )
 
 
@@ -213,6 +231,18 @@ class LessonTranslator:
                 labels = [*data.inputs, data.mechanism, *data.outputs]
                 texts.extend(labels)
                 cause_effect_label_count = len(labels)
+            number_line_label_count = 0
+            if scene.number_line_data is not None:
+                texts.extend(scene.number_line_data.operation_labels)
+                number_line_label_count = len(scene.number_line_data.operation_labels)
+            equation_operation_count = 0
+            if scene.equation_steps_data is not None:
+                texts.extend(scene.equation_steps_data.operations)
+                equation_operation_count = len(scene.equation_steps_data.operations)
+            cycle_label_count = 0
+            if scene.cycle_data is not None:
+                texts.extend([scene.cycle_data.center_label, *scene.cycle_data.stages])
+                cycle_label_count = len(scene.cycle_data.stages) + 1
 
             translated = self._translate_blocks(texts, target_language)
             updates: dict[str, object] = {
@@ -245,6 +275,50 @@ class LessonTranslator:
                 except ValueError as exc:
                     raise TranslationUnavailable(
                         "Translated visual labels do not fit the visual schema."
+                    ) from exc
+            cursor = 3 + len(visual_keys) + cause_effect_label_count
+            if scene.number_line_data is not None:
+                data = scene.number_line_data
+                labels = translated[cursor : cursor + number_line_label_count]
+                cursor += number_line_label_count
+                try:
+                    updates["number_line_data"] = NumberLineData.model_validate(
+                        {
+                            "start_value": data.start_value,
+                            "jumps": data.jumps,
+                            "operation_labels": labels,
+                            "result": data.result,
+                        },
+                        strict=True,
+                    )
+                except ValueError as exc:
+                    raise TranslationUnavailable(
+                        "Translated number-line labels do not fit the visual schema."
+                    ) from exc
+            if scene.equation_steps_data is not None:
+                data = scene.equation_steps_data
+                operations = translated[cursor : cursor + equation_operation_count]
+                cursor += equation_operation_count
+                try:
+                    updates["equation_steps_data"] = EquationStepsData.model_validate(
+                        {"equations": data.equations, "operations": operations},
+                        strict=True,
+                    )
+                except ValueError as exc:
+                    raise TranslationUnavailable(
+                        "Translated equation labels do not fit the visual schema."
+                    ) from exc
+            if scene.cycle_data is not None:
+                stages = translated[cursor : cursor + cycle_label_count]
+                data = scene.cycle_data
+                try:
+                    updates["cycle_data"] = CycleData.model_validate(
+                        {"center_label": stages[0], "stages": stages[1:]},
+                        strict=True,
+                    )
+                except (IndexError, ValueError) as exc:
+                    raise TranslationUnavailable(
+                        "Translated cycle labels do not fit the visual schema."
                     ) from exc
             scenes.append(scene.model_copy(update=updates))
         translated = lesson.model_copy(

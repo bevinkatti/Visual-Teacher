@@ -58,8 +58,10 @@ def test_local_lesson_api_renders_and_serves_real_mp4():
 
     manifest = json.loads(record.manifest_path.read_text(encoding="utf-8"))
     assert manifest["timing_basis"].startswith("Measured duration")
+    assert manifest["caption_timing_basis"].startswith("Caption text comes from narration")
     assert len(manifest["scenes"]) == len(lesson["scenes"])
     assert all(scene["audio_seconds"] > 0 for scene in manifest["scenes"])
+    assert all(scene["captions"] for scene in manifest["scenes"])
 
     video = client.get(job["video_url"])
     download = client.get(job["download_url"])

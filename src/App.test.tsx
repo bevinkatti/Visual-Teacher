@@ -76,6 +76,12 @@ function renderManifest() {
       audio_seconds: 10,
       pause_seconds: 2,
       end_seconds: (index + 1) * 12,
+      captions: index === 1
+        ? [
+          { start_seconds: 12, end_seconds: 15, text: 'The denominator tells how many' },
+          { start_seconds: 15, end_seconds: 22, text: 'equal parts make the whole.' },
+        ]
+        : [{ start_seconds: index * 12, end_seconds: index * 12 + 10, text: scene.narration }],
       visual_timeline: [],
     })),
   }
@@ -243,6 +249,14 @@ describe('lesson studio API integration', () => {
     Object.defineProperty(video, 'currentTime', { configurable: true, get: () => currentTime, set: (value: number) => { currentTime = value } })
     act(() => video.dispatchEvent(new Event('timeupdate', { bubbles: true })))
     expect(screen.getByRole('heading', { name: 'Read the numerator and denominator' })).toBeInTheDocument()
+    const sceneCaption = screen.getByText('The denominator tells how many').closest('.stage-caption')
+    expect(sceneCaption).toBeVisible()
+    currentTime = 16
+    act(() => video.dispatchEvent(new Event('timeupdate', { bubbles: true })))
+    expect(screen.getByText('equal parts make the whole.')).toBeVisible()
+    currentTime = 22
+    act(() => video.dispatchEvent(new Event('timeupdate', { bubbles: true })))
+    expect(sceneCaption).not.toBeVisible()
     const playMock = vi.fn().mockResolvedValue(undefined)
     Object.defineProperty(video, 'play', { configurable: true, value: playMock })
     await user.click(screen.getByRole('button', { name: 'Next scene' }))

@@ -285,6 +285,34 @@ def test_api_success_reports_ollama_source_and_not_fallback(monkeypatch):
     assert response.json()["fallback"] is False
 
 
+def test_api_uses_authored_rag_lesson_without_a_generic_model_plan(monkeypatch):
+    class UnusedPlanner:
+        def plan(self, _request):
+            raise AssertionError("RAG has an authored local lesson and must not use generic planning.")
+
+    registered = {}
+
+    def capture_registration(lesson, **kwargs):
+        registered["lesson"] = lesson
+        registered.update(kwargs)
+
+    monkeypatch.setattr("backend.main.OllamaPlanner", UnusedPlanner)
+    monkeypatch.setattr("backend.main.render_jobs.register_lesson", capture_registration)
+    response = TestClient(app).post(
+        "/api/lessons",
+        json={"topic": "What is RAG?", "language": "en", "duration_seconds": 30},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    narration = " ".join(scene["narration"] for scene in body["scenes"]).lower()
+    assert body["source"] == "sample" and body["fallback"] is False
+    assert "retrieve" in narration and "prompt" in narration
+    assert "good example makes the idea easy to picture" not in narration
+    assert registered["lesson"].id == body["id"]
+    assert registered["grow_pool"]
+
+
 def test_api_keeps_request_validation_and_health_fallback_contract(monkeypatch):
     class UnusedPlanner:
         def plan(self, _request):

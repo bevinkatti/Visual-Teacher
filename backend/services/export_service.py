@@ -25,6 +25,7 @@ from backend.services.duration_budget import (
     narrator_engine,
     speech_budget_seconds,
     spoken_length,
+    split_sentences,
     tolerance_seconds,
     trim_to_char_budget,
 )
@@ -49,6 +50,13 @@ class TimelineEntry:
     scene: Scene
     audio_seconds: float
     pause_seconds: float
+    start_seconds: float
+    end_seconds: float
+
+
+@dataclass(frozen=True)
+class CaptionCue:
+    text: str
     start_seconds: float
     end_seconds: float
 
@@ -96,12 +104,81 @@ def _timestamp_srt(seconds: float) -> str:
     return f"{hours:02}:{minutes:02}:{secs:02},{millis:03}"
 
 
-def _write_srt(path: Path, timeline: list[TimelineEntry]) -> None:
+def build_caption_cues(
+    narration: str,
+    *,
+    start_seconds: float,
+    audio_seconds: float,
+    max_characters: int = 48,
+    max_words: int = 8,
+) -> list[CaptionCue]:
+    """Break spoken narration into readable cues across its measured audio span.
+
+    The TTS engines return scene audio without word timestamps. Cue boundaries
+    therefore follow spoken text length over the measured utterance duration;
+    this keeps the visible words in the same order and approximately the same
+    cadence as the narration without additional synthesis or alignment models.
+    """
+    sentences = split_sentences(narration)
+    chunks: list[str] = []
+    for sentence in sentences or [narration.strip()]:
+        current: list[str] = []
+        for word in sentence.split():
+            candidate = " ".join((*current, word))
+            if current and (len(candidate) > max_characters or len(current) >= max_words):
+                chunks.append(" ".join(current))
+                current = [word]
+            else:
+                current.append(word)
+        if current:
+            chunks.append(" ".join(current))
+
+    chunks = [chunk for chunk in chunks if chunk]
+    if not chunks:
+        chunks = [narration.strip() or " "]
+    weights = [max(1, spoken_length(chunk)) for chunk in chunks]
+    total_weight = sum(weights)
+    cues: list[CaptionCue] = []
+    elapsed_weight = 0
+    for index, (chunk, weight) in enumerate(zip(chunks, weights, strict=True)):
+        cue_start = start_seconds + audio_seconds * elapsed_weight / total_weight
+        elapsed_weight += weight
+        cue_end = (
+            start_seconds + audio_seconds
+            if index == len(chunks) - 1
+            else start_seconds + audio_seconds * elapsed_weight / total_weight
+        )
+        cues.append(CaptionCue(chunk, cue_start, cue_end))
+    return cues
+
+
+def _caption_cues_for_timeline(timeline: list[TimelineEntry]) -> list[list[CaptionCue]]:
+    return [
+        build_caption_cues(
+            entry.scene.narration,
+            start_seconds=entry.start_seconds,
+            audio_seconds=entry.audio_seconds,
+        )
+        for entry in timeline
+    ]
+
+
+def _write_srt(
+    path: Path,
+    timeline: list[TimelineEntry],
+    caption_timelines: list[list[CaptionCue]] | None = None,
+) -> None:
     cues = []
-    for index, item in enumerate(timeline, start=1):
-        start = item.start_seconds
-        end = start + item.audio_seconds
-        cues.extend((str(index), f"{_timestamp_srt(start)} --> {_timestamp_srt(end)}", item.scene.caption, ""))
+    caption_index = 0
+    for scene_cues in caption_timelines or _caption_cues_for_timeline(timeline):
+        for cue in scene_cues:
+            caption_index += 1
+            cues.extend((
+                str(caption_index),
+                f"{_timestamp_srt(cue.start_seconds)} --> {_timestamp_srt(cue.end_seconds)}",
+                cue.text,
+                "",
+            ))
     path.write_text("\n".join(cues), encoding="utf-8")
 
 
@@ -128,6 +205,7 @@ def _render_frames(
     *,
     fps: int = FPS,
     visual_timelines: list[list[dict[str, object]]] | None = None,
+    caption_timelines: list[list[CaptionCue]] | None = None,
 ) -> int:
     renderer = SceneRenderer()
     total_duration = timeline[-1].end_seconds
@@ -142,6 +220,7 @@ def _render_frames(
             else []
             for entry in timeline
         ]
+    caption_timelines = caption_timelines or _caption_cues_for_timeline(timeline)
     entry_index = 0
     for frame_index in range(frame_count):
         timestamp = frame_index / fps
@@ -150,6 +229,17 @@ def _render_frames(
         entry = timeline[entry_index]
         local_time = max(0.0, timestamp - entry.start_seconds)
         local_progress = min(1.0, local_time / entry.audio_seconds)
+        cue = next(
+            (
+                item for item in caption_timelines[entry_index]
+                if item.start_seconds <= timestamp < item.end_seconds
+            ),
+            caption_timelines[entry_index][-1],
+        )
+        caption_progress = min(
+            1.0,
+            max(0.0, (timestamp - cue.start_seconds) / max(0.001, cue.end_seconds - cue.start_seconds)),
+        )
         total_progress = min(1.0, timestamp / total_duration)
         visual_state = visual_state_at_progress(visual_timelines[entry_index], local_progress)
         frame = renderer.render(
@@ -159,6 +249,9 @@ def _render_frames(
             scene_number=entry_index + 1,
             scene_count=len(lesson.scenes),
             visual_state=visual_state,
+            caption_visible=local_time < entry.audio_seconds,
+            caption_text=cue.text,
+            caption_progress=caption_progress,
         )
         if frame.size != (WIDTH, HEIGHT):
             raise RuntimeError("Scene renderer returned a frame with the wrong dimensions.")
@@ -405,11 +498,16 @@ def export_lesson(
             else []
             for entry in timeline
         ]
+        caption_timelines = _caption_cues_for_timeline(timeline)
 
         render_start = time.monotonic()
         frames_dir = work_dir / "frames"
         frame_count = _render_frames(
-            working_lesson, timeline, frames_dir, visual_timelines=visual_timelines
+            working_lesson,
+            timeline,
+            frames_dir,
+            visual_timelines=visual_timelines,
+            caption_timelines=caption_timelines,
         )
         stage_seconds["scene_render"] = time.monotonic() - render_start
 
@@ -456,7 +554,7 @@ def export_lesson(
         media_info = verify_mp4(output_path)
         stage_seconds["ffprobe_verification"] = time.monotonic() - verify_start
 
-        _write_srt(captions_path, timeline)
+        _write_srt(captions_path, timeline, caption_timelines)
         stage_seconds["total"] = time.monotonic() - total_start
         output_duration = float(media_info["duration_seconds"])
         duration_within_tolerance = output_duration <= tolerance
@@ -481,6 +579,10 @@ def export_lesson(
                 "Measured duration of each synthesized scene WAV plus the validated scene "
                 "pause; narration is budgeted against the requested target duration."
             ),
+            "caption_timing_basis": (
+                "Caption text comes from narration; cue intervals follow spoken-text length "
+                "across each scene's measured TTS audio duration."
+            ),
             "stages_seconds": stage_seconds,
             "scenes": [
                 {
@@ -489,6 +591,14 @@ def export_lesson(
                     "audio_seconds": item.audio_seconds,
                     "pause_seconds": item.pause_seconds,
                     "end_seconds": item.end_seconds,
+                    "captions": [
+                        {
+                            "text": cue.text,
+                            "start_seconds": cue.start_seconds,
+                            "end_seconds": cue.end_seconds,
+                        }
+                        for cue in caption_timelines[index]
+                    ],
                     "visual_timeline": visual_timelines[index],
                 }
                 for index, item in enumerate(timeline)

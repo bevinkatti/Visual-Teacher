@@ -78,7 +78,7 @@ output/videos/
 output/inspection/
 output/audio/
 output/tmp/
-
+output/pdf/
 # Secrets
 .env
 .env.*
@@ -103,3 +103,4 @@ output/videos/
 output/inspection/
 output/audio/
 output/tmp/
+

@@ -449,6 +449,9 @@ class SceneRenderer:
         scene_number: int,
         scene_count: int,
         visual_state: dict[str, Any] | None = None,
+        caption_visible: bool = True,
+        caption_text: str | None = None,
+        caption_progress: float | None = None,
     ) -> Image.Image:
         progress = max(0.0, min(1.0, scene_progress))
         image = self._background.copy()
@@ -498,6 +501,9 @@ class SceneRenderer:
             "legacy_code": self._draw_code,
             "fraction_model": self._draw_fraction_model,
             "cause_effect": self._draw_cause_effect,
+            "number_line": self._draw_number_line,
+            "equation_steps": self._draw_equation_steps,
+            "cycle": self._draw_cycle,
         }
         body = dispatch.get(key)
         if body is not None:
@@ -510,7 +516,9 @@ class SceneRenderer:
                 )
             self._draw_code_execution(draw, scene, progress, state or {})
 
-        # Caption panel with typewriter reveal synced to the scene audio.
+        # Caption panel reveals the active narration cue over that cue's audio.
+        visible_caption = scene.caption if caption_text is None else caption_text
+        reveal_progress = progress if caption_progress is None else _clamp01(caption_progress)
         panel_t = _ease_out_cubic(_seg(progress, 0.0, 0.05))
         panel_y = 584 + _slide(panel_t, 14)
         draw.rounded_rectangle(
@@ -521,27 +529,32 @@ class SceneRenderer:
             width=1,
         )
         draw.text((86, panel_y + 13), "CAPTION", font=_font(12, True), fill=CYAN)
-        caption_font = _font_for_text(scene.caption, 20)
-        caption_lines = _wrap(draw, scene.caption, caption_font, 1070)
+        caption_font = _font_for_text(visible_caption, 20)
+        caption_lines = _wrap(draw, visible_caption, caption_font, 1070)
         while len(caption_lines) > 4 and getattr(caption_font, "size", 20) > 10:
-            caption_font = _font_for_text(scene.caption, getattr(caption_font, "size", 20) - 2)
-            caption_lines = _wrap(draw, scene.caption, caption_font, 1070)
+            caption_font = _font_for_text(visible_caption, getattr(caption_font, "size", 20) - 2)
+            caption_lines = _wrap(draw, visible_caption, caption_font, 1070)
         if len(caption_lines) > 4:
             # Never fail a render over caption length: translated captions can
             # run long. Keep the first three lines plus an ellipsis tail; the
             # narration still carries the full sentence.
             caption_lines = caption_lines[:3] + [caption_lines[3][:44].rstrip() + "…"]
-        shown_lines = _reveal_lines(caption_lines, _seg(progress, 0.02, 0.88))
+        shown_lines = _reveal_lines(caption_lines, _seg(reveal_progress, 0.0, 0.72))
         line_y = panel_y + 35
         line_spacing = 23 if len(caption_lines) <= 3 else 18
         cursor_line = len(shown_lines) - 1
         for index, line in enumerate(shown_lines):
             color = WHITE if index < cursor_line else _mix(MUTED, WHITE, 0.75)
             _draw_script_aware(draw, (86, line_y), line, caption_font, color)
-            if index == cursor_line and 0.02 < progress < 0.9 and int(progress * 240) % 2 == 0:
+            if index == cursor_line and reveal_progress < 0.95 and int(reveal_progress * 240) % 2 == 0:
                 cursor_x = 86 + _script_aware_textlength(draw, line, caption_font)
                 draw.rectangle((cursor_x + 3, line_y + 2, cursor_x + 5, line_y + 17), fill=CYAN)
             line_y += line_spacing
+
+        if not caption_visible:
+            # The scene image holds during its pause; restore the caption area
+            # so the on-screen caption ends with its measured narration audio.
+            image.paste(self._background.crop((62, 574, 1218, 700)), (62, 574))
 
         # Lesson progress bar with eased fill and a glowing head.
         filled = _ease_in_out(_clamp01(lesson_progress))
@@ -923,6 +936,180 @@ class SceneRenderer:
         for index, (box, label) in enumerate(zip(outputs, data.outputs, strict=True)):
             appear_t = _seg(progress, 0.66 + index * 0.08, 0.81 + index * 0.08)
             draw_node(box, label, appear_t, (YELLOW, GREEN)[index % 2], 17)
+
+    @staticmethod
+    def _draw_number_line(draw: ImageDraw.ImageDraw, scene: Scene, progress: float) -> None:
+        data = scene.number_line_data
+        if data is None:
+            SceneRenderer._draw_concept(draw, scene, progress)
+            return
+
+        positions = [data.start_value]
+        for jump in data.jumps:
+            positions.append(positions[-1] + jump)
+        low, high = max(-20, min(positions) - 1), min(20, max(positions) + 1)
+        if high - low < 4:
+            midpoint = (low + high) // 2
+            low = max(-20, min(low, midpoint - 2))
+            high = min(20, max(high, midpoint + 2))
+        x0, x1, axis_y = 122, 1158, 402
+
+        def x_for(value: float) -> float:
+            return x0 + (value - low) * (x1 - x0) / max(1, high - low)
+
+        axis_t = _seg(progress, 0.06, 0.18)
+        if axis_t > 0:
+            draw.line((x0, axis_y, x0 + int((x1 - x0) * axis_t), axis_y), fill=_appear((103, 133, 169), axis_t), width=3)
+            label_step = max(1, math.ceil((high - low) / 24))
+            for value in range(low, high + 1):
+                tick_x = int(x_for(value))
+                draw.line((tick_x, axis_y - 8, tick_x, axis_y + 8), fill=(122, 148, 177), width=2)
+                if value % label_step == 0 or value in positions:
+                    _draw_centered(draw, (tick_x - 23, axis_y + 14, tick_x + 23, axis_y + 42), str(value), _font(13, True), MUTED)
+
+        # Each signed jump is drawn as its own arc. The marker advances along
+        # the current arc, then holds at the final integer for the takeaway.
+        marker_value = float(data.start_value)
+        for index, (start, end, label) in enumerate(zip(positions, positions[1:], data.operation_labels, strict=True)):
+            begin = 0.18 + index * 0.16
+            finish = begin + 0.15
+            t = _ease_out_cubic(_seg(progress, begin, finish))
+            if t <= 0:
+                break
+            sx, ex = x_for(start), x_for(end)
+            direction = 1 if end >= start else -1
+            control_y = axis_y - direction * (55 + min(42, abs(end - start) * 7))
+            points: list[tuple[int, int]] = []
+            samples = max(2, int(24 * t))
+            for sample in range(samples + 1):
+                local = t * sample / samples
+                inverse = 1 - local
+                px = inverse * inverse * sx + 2 * inverse * local * ((sx + ex) / 2) + local * local * ex
+                py = inverse * inverse * axis_y + 2 * inverse * local * control_y + local * local * axis_y
+                points.append((int(px), int(py)))
+            if len(points) >= 2:
+                draw.line(points, fill=_mix(CYAN, YELLOW, index / max(1, len(data.jumps) - 1)), width=4)
+                if t >= 0.98:
+                    tip_x, tip_y = points[-1]
+                    previous_x, previous_y = points[-2]
+                    angle = math.atan2(tip_y - previous_y, tip_x - previous_x)
+                    size = 11
+                    left = (tip_x - int(size * math.cos(angle - 0.55)), tip_y - int(size * math.sin(angle - 0.55)))
+                    right = (tip_x - int(size * math.cos(angle + 0.55)), tip_y - int(size * math.sin(angle + 0.55)))
+                    draw.polygon((points[-1], left, right), fill=CYAN)
+            label_t = _seg(progress, begin + 0.04, begin + 0.18)
+            if label_t > 0:
+                mid_x = int((sx + ex) / 2)
+                _draw_centered(draw, (mid_x - 95, control_y - 34, mid_x + 95, control_y - 8), _typewriter(label, label_t), _font_for_text(label, 15, True), _appear(WHITE, label_t), bold=True)
+            marker_value = start + (end - start) * t
+            if t < 1:
+                break
+
+        marker_x = int(x_for(marker_value))
+        marker_t = _seg(progress, 0.14, 0.28)
+        if marker_t > 0:
+            draw.ellipse((marker_x - 12, axis_y - 12, marker_x + 12, axis_y + 12), fill=_appear(BLUE, marker_t), outline=WHITE, width=2)
+        result_t = _seg(progress, 0.84, 0.94)
+        if result_t > 0:
+            result_box = (472, 464, 808, 520)
+            draw.rounded_rectangle(result_box, radius=12, fill=_appear((15, 39, 66), result_t), outline=_appear(BLUE, result_t), width=2)
+            _draw_centered(draw, result_box, f"Result: {data.result}", _font(24, True), _appear(WHITE, result_t), bold=True)
+
+    @staticmethod
+    def _draw_equation_steps(draw: ImageDraw.ImageDraw, scene: Scene, progress: float) -> None:
+        data = scene.equation_steps_data
+        if data is None:
+            SceneRenderer._draw_concept(draw, scene, progress)
+            return
+        equation_box = (205, 768)
+        operation_box = (812, 1203)
+        first_y, pitch, row_h = 263, 50, 38
+        for index, equation in enumerate(data.equations):
+            reveal_start = 0.08 + index * 0.16
+            t = _ease_out_cubic(_seg(progress, reveal_start, reveal_start + 0.14))
+            if t <= 0:
+                continue
+            row_y = first_y + index * pitch
+            box = (equation_box[0], row_y, equation_box[1], row_y + row_h)
+            fill = _appear((15, 37, 62) if index == 0 else (20, 45, 69), t)
+            accent = BLUE if index == 0 else CYAN
+            draw.rounded_rectangle(box, radius=9, fill=fill, outline=_appear(accent, t), width=2)
+            equation_size = 25
+            equation_font = _font_for_text(equation, equation_size, True)
+            while equation_size > 15 and _script_aware_textlength(draw, equation, equation_font, bold=True) > box[2] - box[0] - 34:
+                equation_size -= 1
+                equation_font = _font_for_text(equation, equation_size, True)
+            _draw_centered(draw, box, _typewriter(equation, _seg(progress, reveal_start + 0.02, reveal_start + 0.13)), equation_font, _appear(WHITE, t), bold=True)
+            if index < len(data.operations):
+                op_start = reveal_start + 0.09
+                op_t = _seg(progress, op_start, op_start + 0.11)
+                if op_t > 0:
+                    op_box = (operation_box[0], row_y, operation_box[1], row_y + row_h)
+                    draw.rounded_rectangle(op_box, radius=8, fill=_appear((13, 28, 45), op_t), outline=_appear((76, 100, 130), op_t), width=1)
+                    op = _typewriter(data.operations[index], op_t)
+                    op_font = _font_for_text(data.operations[index], 15, True)
+                    _draw_centered(draw, op_box, op, op_font, _appear(MUTED, op_t), bold=True)
+            if index < len(data.equations) - 1:
+                next_y = first_y + (index + 1) * pitch
+                connector_t = _seg(progress, reveal_start + 0.1, reveal_start + 0.22)
+                if connector_t > 0:
+                    x = 184
+                    draw.line((x, row_y + row_h, x, row_y + row_h + int((pitch - row_h - 3) * connector_t)), fill=_appear((108, 139, 171), connector_t), width=2)
+                    if connector_t >= 0.98:
+                        draw.polygon(((x - 5, next_y - 7), (x + 5, next_y - 7), (x, next_y - 1)), fill=CYAN)
+
+    @staticmethod
+    def _draw_cycle(draw: ImageDraw.ImageDraw, scene: Scene, progress: float) -> None:
+        data = scene.cycle_data
+        if data is None:
+            SceneRenderer._draw_concept(draw, scene, progress)
+            return
+        count = len(data.stages)
+        center_x, center_y = 640, 392
+        radius_x, radius_y = 408, 132
+        node_w, node_h = 204, 62
+        centers: list[tuple[int, int]] = []
+        for index in range(count):
+            angle = -math.pi / 2 + math.tau * index / count
+            centers.append((int(center_x + radius_x * math.cos(angle)), int(center_y + radius_y * math.sin(angle))))
+
+        # Reveal one directed connection at a time so learners can follow the
+        # order and see where the repeating process closes.
+        for index in range(count):
+            begin = 0.18 + index * (0.58 / count)
+            t = _ease_out_cubic(_seg(progress, begin, begin + 0.12))
+            if t <= 0:
+                continue
+            sx, sy = centers[index]
+            ex, ey = centers[(index + 1) % count]
+            start = (int(sx + (node_w / 2 - 10) * math.cos(math.atan2(ey - sy, ex - sx))), int(sy + (node_h / 2 - 7) * math.sin(math.atan2(ey - sy, ex - sx))))
+            end = (int(ex - (node_w / 2 - 12) * math.cos(math.atan2(ey - sy, ex - sx))), int(ey - (node_h / 2 - 9) * math.sin(math.atan2(ey - sy, ex - sx))))
+            px = int(_lerp(start[0], end[0], t))
+            py = int(_lerp(start[1], end[1], t))
+            draw.line((start[0], start[1], px, py), fill=_appear(CYAN, t), width=3)
+            if t >= 0.95:
+                angle = math.atan2(end[1] - start[1], end[0] - start[0])
+                tip = end
+                size = 10
+                left = (tip[0] - int(size * math.cos(angle - 0.55)), tip[1] - int(size * math.sin(angle - 0.55)))
+                right = (tip[0] - int(size * math.cos(angle + 0.55)), tip[1] - int(size * math.sin(angle + 0.55)))
+                draw.polygon((tip, left, right), fill=CYAN)
+
+        center_box = (center_x - 158, center_y - 34, center_x + 158, center_y + 34)
+        center_t = _seg(progress, 0.14, 0.30)
+        if center_t > 0:
+            draw.rounded_rectangle(center_box, radius=13, fill=_appear((12, 31, 52), center_t), outline=_appear((72, 102, 137), center_t), width=2)
+            _draw_centered(draw, center_box, data.center_label, _font_for_text(data.center_label, 19, True), _appear(WHITE, center_t), bold=True)
+
+        for index, (label, (x, y)) in enumerate(zip(data.stages, centers, strict=True)):
+            begin = 0.08 + index * 0.10
+            t = _ease_out_cubic(_seg(progress, begin, begin + 0.15))
+            if t <= 0:
+                continue
+            box = (x - node_w // 2, y - node_h // 2, x + node_w // 2, y + node_h // 2)
+            draw.rounded_rectangle(box, radius=11, fill=_appear((17, 40, 64), t), outline=_appear(BLUE if index % 2 == 0 else CYAN, t), width=2)
+            font = _font_for_text(label, 16, True)
+            _draw_centered(draw, box, _typewriter(label, _seg(progress, begin + 0.02, begin + 0.14)), font, _appear(WHITE, t), bold=True)
 
     @staticmethod
     def _draw_code(draw: ImageDraw.ImageDraw, data_or_scene: Any, progress: float) -> None:

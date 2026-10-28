@@ -4,6 +4,7 @@ import re
 from backend.schemas import (
     CauseEffectData,
     CodeExecutionData,
+    CycleData,
     FallbackReason,
     FractionModelData,
     Lesson,
@@ -25,6 +26,9 @@ PYTHON_LOOP_TOPICS = {
 }
 FRACTION_TOPIC = re.compile(r"\b(fractions?|parts of a whole|one half|one third|one quarter)\b", re.I)
 PHOTOSYNTHESIS_TOPIC = re.compile(r"photosynth", re.I)
+RAG_TOPIC = re.compile(r"\b(?:rag|retrieval[- ]augmented generation)\b", re.I)
+DEEP_LEARNING_TOPIC = re.compile(r"\bdeep learning\b|\bdeep neural networks?\b", re.I)
+NEURAL_NETWORK_TOPIC = re.compile(r"\bneural networks?\b", re.I)
 
 DEFAULT_PAUSE_SECONDS = 0.35
 
@@ -127,6 +131,7 @@ def _build_scenes_from_templates(
                 execution_data=template.get("execution_data"),
                 fraction_data=template.get("fraction_data"),
                 cause_effect_data=template.get("cause_effect_data"),
+                cycle_data=template.get("cycle_data"),
                 pause_seconds=DEFAULT_PAUSE_SECONDS,
             )
         )
@@ -498,6 +503,240 @@ def _python_loop_templates_kn(topic: str) -> list[dict]:
     ]
 
 
+def curated_engineering_topic(topic: str) -> str | None:
+    """Return the authored lesson strategy for engineering topics Blu can teach well."""
+    if RAG_TOPIC.search(topic):
+        return "rag"
+    if DEEP_LEARNING_TOPIC.search(topic):
+        return "deep_learning"
+    if NEURAL_NETWORK_TOPIC.search(topic):
+        return "neural_network"
+    return None
+
+
+def _rag_templates_en(topic: str) -> list[dict]:
+    return [
+        {
+            "title": "RAG gives an answer access to source material",
+            "caption": "Retrieval-Augmented Generation brings relevant documents into an answer step.",
+            "visual_type": "title_card",
+            "visual_data": {
+                "topic": topic,
+                "subtitle": "Retrieve relevant text, add it to the prompt, then generate.",
+            },
+            "narration_pool": [
+                "RAG means Retrieval-Augmented Generation: a language model can use retrieved information while answering.",
+                "Think of it as giving the model an open book for this question.",
+                "The system searches a knowledge source at answer time, then passes useful text along with the question.",
+                "The model's weights are not retrained for each question; the extra evidence is supplied as context.",
+            ],
+        },
+        {
+            "title": "Follow one question through RAG",
+            "caption": "A question becomes a search, added context, and a generated response.",
+            "visual_type": "process_flow",
+            "visual_data": {
+                "input": "Question about leave carryover",
+                "process": "Retrieve handbook passages",
+                "step_2": "Add passages to the prompt",
+                "output": "LLM drafts an answer",
+            },
+            "narration_pool": [
+                "Ask what the handbook says about leave carryover; retrieval searches for matching passages.",
+                "Those passages are added to the prompt beside the original question.",
+                "The language model then uses that context to draft a response, instead of answering from its parameters alone.",
+                "This sequence is retrieval, context augmentation, and generation.",
+            ],
+        },
+        {
+            "title": "Retrieved context changes the prompt",
+            "caption": "The retrieved passages guide generation, but do not guarantee a correct answer.",
+            "visual_type": "cause_effect",
+            "visual_data": {},
+            "cause_effect_data": CauseEffectData(
+                inputs=["User question", "Handbook passages"],
+                mechanism="Context joins the prompt",
+                outputs=["Draft answer"],
+            ),
+            "narration_pool": [
+                "Watch what changes: the question stays, and selected passages are added as context.",
+                "The model generates from the combined prompt; retrieval does not update the model's weights.",
+                "If the search misses a useful passage, the answer may still be incomplete.",
+                "RAG can make an answer easier to ground in sources, but it does not guarantee truth.",
+            ],
+        },
+        {
+            "title": "Keep the evidence attached to the answer",
+            "caption": "Check the retrieved evidence and the generated response together.",
+            "visual_type": "concept_diagram",
+            "visual_data": {
+                "left": "Retrieved source passages",
+                "relationship": "provide evidence for",
+                "right": "Answer to review",
+            },
+            "narration_pool": [
+                "The useful mental model is a search step followed by a writing step.",
+                "A source passage can support the response, but a person should still check whether it answers the question accurately.",
+                "RAG combines retrieval with generation; it is not a promise that every generated claim is correct.",
+                "When you inspect a RAG system, ask which sources it found and how their text reached the prompt.",
+            ],
+        },
+    ]
+
+
+def _deep_learning_templates_en(topic: str) -> list[dict]:
+    return [
+        {
+            "title": "Deep learning stacks learnable layers",
+            "caption": "A deep model transforms input through multiple learned layers.",
+            "visual_type": "title_card",
+            "visual_data": {
+                "topic": topic,
+                "subtitle": "Examples train the weights; signals then pass forward through layers.",
+            },
+            "narration_pool": [
+                "Deep learning uses neural networks with multiple layers of learnable weights.",
+                "Each layer transforms signals from the layer before it, building an internal representation.",
+                "During training, examples and target answers help adjust the weights.",
+                "After training, new input travels forward through those layers to produce a prediction.",
+            ],
+        },
+        {
+            "title": "Signals become richer representations",
+            "caption": "Input signals pass through learned layers before a prediction appears.",
+            "visual_type": "process_flow",
+            "visual_data": {
+                "input": "Input example",
+                "process": "Early layer detects patterns",
+                "step_2": "Later layers combine features",
+                "output": "Prediction",
+            },
+            "narration_pool": [
+                "For an image, pixel values pass through layers that learn patterns such as edges.",
+                "Later layers combine earlier signals into more useful features for the task.",
+                "The final layer turns those signals into a prediction, such as a class score.",
+                "The exact features are learned from data rather than hand-written as fixed rules.",
+            ],
+        },
+        {
+            "title": "Training adjusts the layer weights",
+            "caption": "A prediction error sends a learning signal back to update weights.",
+            "visual_type": "cycle",
+            "visual_data": {},
+            "cycle_data": CycleData(
+                center_label="training loop",
+                stages=[
+                    "training example",
+                    "forward prediction",
+                    "measure prediction error",
+                    "backpropagate gradients",
+                    "update layer weights",
+                ],
+            ),
+            "narration_pool": [
+                "Training repeats a loop: show an example, compute a prediction, and compare it with the target.",
+                "A loss value measures the mismatch for the chosen task.",
+                "Backpropagation calculates how the weights contributed to that error.",
+                "An optimizer uses those gradients to adjust weights, and the next training pass can improve the fit.",
+                "This is how the layers learn from examples; adding layers alone does not guarantee a better model.",
+            ],
+        },
+        {
+            "title": "Depth means several learned transformations",
+            "caption": "The model builds a prediction by composing transformations across layers.",
+            "visual_type": "concept_diagram",
+            "visual_data": {
+                "left": "Input features",
+                "relationship": "transform across learned layers",
+                "right": "Task prediction",
+            },
+            "narration_pool": [
+                "The central idea is a chain of learned transformations between input and output.",
+                "During training, error signals tune the weights in that chain using examples.",
+                "At use time, information moves forward through the trained layers to produce a prediction.",
+                "Deep learning names this multilayer approach; performance still depends on data, design, and evaluation.",
+            ],
+        },
+    ]
+
+
+def _neural_network_templates_en(topic: str) -> list[dict]:
+    return [
+        {
+            "title": "A neural network transforms input signals",
+            "caption": "Connected units combine signals and pass results to the next layer.",
+            "visual_type": "title_card",
+            "visual_data": {
+                "topic": topic,
+                "subtitle": "Inputs flow through weighted connections to produce an output.",
+            },
+            "narration_pool": [
+                "A neural network is a set of connected computing units arranged in layers.",
+                "Each connection has a learned weight that controls how strongly one signal affects the next unit.",
+                "Units combine incoming values, apply an activation function, and pass a result forward.",
+                "Training adjusts the weights so the network's predictions better match examples.",
+            ],
+        },
+        {
+            "title": "Trace a signal through one layer",
+            "caption": "A unit computes a weighted sum, applies an activation, and sends a signal onward.",
+            "visual_type": "process_flow",
+            "visual_data": {
+                "input": "Input values",
+                "process": "Multiply by connection weights",
+                "step_2": "Sum and apply activation",
+                "output": "Pass signal forward",
+            },
+            "narration_pool": [
+                "A unit multiplies each input value by its connection weight, then combines the results.",
+                "The unit adds those weighted values, then an activation function transforms the sum.",
+                "That output becomes an input signal for units in the next layer.",
+                "Repeating this operation across layers produces the network's final output.",
+            ],
+        },
+        {
+            "title": "Weights control the signal",
+            "caption": "Changing a connection weight changes the unit's combined signal.",
+            "visual_type": "cause_effect",
+            "visual_data": {},
+            "cause_effect_data": CauseEffectData(
+                inputs=["Input values", "Connection weights"],
+                mechanism="Weighted sum plus activation",
+                outputs=["Next layer signal"],
+            ),
+            "narration_pool": [
+                "The unit's output depends on both the incoming values and the weights on their connections.",
+                "Changing one weight can raise or lower the combined signal sent onward.",
+                "The activation function then shapes that signal before it reaches the next layer.",
+                "This gives the network a concrete mechanism for turning inputs into predictions.",
+            ],
+        },
+        {
+            "title": "Training tunes the connections",
+            "caption": "Prediction error guides gradual weight updates.",
+            "visual_type": "cycle",
+            "visual_data": {},
+            "cycle_data": CycleData(
+                center_label="weight learning",
+                stages=[
+                    "show a training example",
+                    "compute a prediction",
+                    "measure prediction error",
+                    "send gradients backward",
+                    "adjust connection weights",
+                ],
+            ),
+            "narration_pool": [
+                "To learn, the network first sends an example forward and makes a prediction.",
+                "A loss function compares that prediction with the target answer.",
+                "Gradients indicate how weight changes would affect the loss.",
+                "An optimizer adjusts the connection weights, and training repeats with more examples.",
+                "The visible flow is forward for prediction and backward for learning signals.",
+            ],
+        },
+    ]
+
+
 def _generic_templates_en(topic: str) -> list[dict]:
     return [
         {
@@ -618,8 +857,15 @@ def build_sample_lesson_with_pool(
     """
     topic = request.topic
     is_python_loop = topic.lower() in PYTHON_LOOP_TOPICS
+    engineering_topic = curated_engineering_topic(topic) if request.language == "en" else None
 
-    if is_python_loop:
+    if engineering_topic == "rag":
+        templates = _rag_templates_en(topic)
+    elif engineering_topic == "deep_learning":
+        templates = _deep_learning_templates_en(topic)
+    elif engineering_topic == "neural_network":
+        templates = _neural_network_templates_en(topic)
+    elif is_python_loop:
         templates = {
             "en": _python_loop_templates_en,
             "hi": _python_loop_templates_hi,

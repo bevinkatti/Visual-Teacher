@@ -8,7 +8,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
 from backend.schemas import Lesson, LessonRequest, RenderJobResponse
-from backend.services.lesson_service import build_sample_lesson_with_pool
+from backend.services.lesson_service import (
+    build_sample_lesson_with_pool,
+    curated_engineering_topic,
+)
 from backend.services.ollama_planner import OllamaPlanner, OllamaPlannerError
 from backend.services.translation_service import TranslationUnavailable
 from backend.services.render_jobs import (
@@ -67,22 +70,29 @@ def _build_translator():
 @app.post("/api/lessons", response_model=Lesson)
 def create_lesson(request: LessonRequest):
     planning_start = time.monotonic()
-    try:
-        lesson = OllamaPlanner().plan(request)
+    curated_topic = curated_engineering_topic(request.topic) if request.language == "en" else None
+    grow_pool = None
+    if curated_topic:
+        lesson, grow_pool = build_sample_lesson_with_pool(request)
+        logger.info("Using authored %s lesson for topic %r.", curated_topic, request.topic)
         upstream_stage_seconds = {"planning": time.monotonic() - planning_start}
-    except OllamaPlannerError as exc:
-        logger.warning(
-            "Ollama lesson planning failed (%s): %s; returning the deterministic sample fallback.",
-            exc.reason,
-            exc,
-        )
-        lesson, grow_pool = build_sample_lesson_with_pool(request, fallback_reason=exc.reason)
-        render_jobs.register_lesson(
-            lesson,
-            upstream_stage_seconds={"planning": time.monotonic() - planning_start},
-            grow_pool=grow_pool,
-        )
-        return lesson
+    else:
+        try:
+            lesson = OllamaPlanner().plan(request)
+            upstream_stage_seconds = {"planning": time.monotonic() - planning_start}
+        except OllamaPlannerError as exc:
+            logger.warning(
+                "Ollama lesson planning failed (%s): %s; returning the deterministic sample fallback.",
+                exc.reason,
+                exc,
+            )
+            lesson, grow_pool = build_sample_lesson_with_pool(request, fallback_reason=exc.reason)
+            render_jobs.register_lesson(
+                lesson,
+                upstream_stage_seconds={"planning": time.monotonic() - planning_start},
+                grow_pool=grow_pool,
+            )
+            return lesson
     if request.language != "en":
         translation_start = time.monotonic()
         try:
@@ -103,7 +113,11 @@ def create_lesson(request: LessonRequest):
                 grow_pool=grow_pool,
             )
             return lesson
-    render_jobs.register_lesson(lesson, upstream_stage_seconds=upstream_stage_seconds)
+    render_jobs.register_lesson(
+        lesson,
+        upstream_stage_seconds=upstream_stage_seconds,
+        grow_pool=grow_pool,
+    )
     return lesson
 
 

@@ -3,7 +3,10 @@ import {
   VisualLessonCanvas,
   type CauseEffectData,
   type CodeExecutionData,
+  type CycleData,
+  type EquationStepsData,
   type FractionModelData,
+  type NumberLineData,
   type VisualScene,
   type VisualTimelineFrame,
 } from './VisualLessonCanvas'
@@ -23,6 +26,9 @@ type LessonScene = VisualScene & {
   execution_data?: CodeExecutionData | null
   fraction_data?: FractionModelData | null
   cause_effect_data?: CauseEffectData | null
+  number_line_data?: NumberLineData | null
+  equation_steps_data?: EquationStepsData | null
+  cycle_data?: CycleData | null
 }
 
 type Lesson = {
@@ -58,6 +64,7 @@ type ManifestScene = {
   audio_seconds: number
   pause_seconds: number
   end_seconds: number
+  captions: { text: string; start_seconds: number; end_seconds: number }[]
   visual_timeline: VisualTimelineFrame[]
 }
 
@@ -117,22 +124,62 @@ function isCauseEffectData(value: unknown): value is CauseEffectData {
     !Array.from(value.mechanism).some((character) => character.charCodeAt(0) < 32)
 }
 
+function isNumberLineData(value: unknown): value is NumberLineData {
+  if (!isRecord(value) || Object.keys(value).length !== 4) return false
+  if (typeof value.start_value !== 'number' || !Number.isInteger(value.start_value) || value.start_value < -20 || value.start_value > 20) return false
+  if (typeof value.result !== 'number' || !Number.isInteger(value.result) || value.result < -20 || value.result > 20) return false
+  if (!Array.isArray(value.jumps) || value.jumps.length < 1 || value.jumps.length > 4 || !Array.isArray(value.operation_labels)) return false
+  if (value.operation_labels.length !== value.jumps.length || !value.operation_labels.every((label) => typeof label === 'string' && label.trim().length > 0 && label.length <= 32 && !Array.from(label).some((character) => character.charCodeAt(0) < 32))) return false
+  let position = value.start_value
+  for (const jump of value.jumps) {
+    if (typeof jump !== 'number' || !Number.isInteger(jump) || jump === 0 || jump < -20 || jump > 20) return false
+    position += jump
+    if (position < -20 || position > 20) return false
+  }
+  return position === value.result
+}
+
+function isEquationStepsData(value: unknown): value is EquationStepsData {
+  return isRecord(value) && Object.keys(value).length === 2 &&
+    Array.isArray(value.equations) && value.equations.length >= 2 && value.equations.length <= 5 &&
+    value.equations.every((item) => typeof item === 'string' && item.trim().length > 0 && item.length <= 64 && !Array.from(item).some((character) => character.charCodeAt(0) < 32)) &&
+    Array.isArray(value.operations) && value.operations.length === value.equations.length - 1 &&
+    value.operations.every((item) => typeof item === 'string' && item.trim().length > 0 && item.length <= 48 && !Array.from(item).some((character) => character.charCodeAt(0) < 32))
+}
+
+function isCycleData(value: unknown): value is CycleData {
+  return isRecord(value) && Object.keys(value).length === 2 &&
+    typeof value.center_label === 'string' && value.center_label.trim().length > 0 && value.center_label.length <= 40 &&
+    Array.isArray(value.stages) && value.stages.length >= 3 && value.stages.length <= 6 &&
+    value.stages.every((item) => typeof item === 'string' && item.trim().length > 0 && item.length <= 48 && !Array.from(item).some((character) => character.charCodeAt(0) < 32)) &&
+    new Set(value.stages.map((item) => item.toLocaleLowerCase())).size === value.stages.length
+}
+
 function isScene(value: unknown): value is LessonScene {
   if (!isRecord(value) || !isRecord(value.visual_data)) return false
-  const validVisual = ['title_card', 'concept', 'flow', 'code', 'concept_diagram', 'process_flow', 'code_execution', 'fraction_model', 'cause_effect'].includes(String(value.visual_type))
+  const validVisual = ['title_card', 'concept', 'flow', 'code', 'concept_diagram', 'process_flow', 'code_execution', 'fraction_model', 'cause_effect', 'number_line', 'equation_steps', 'cycle'].includes(String(value.visual_type))
   const executionValid = value.execution_data === null || value.execution_data === undefined || isExecutionData(value.execution_data)
   const fractionValid = value.fraction_data === null || value.fraction_data === undefined || isFractionData(value.fraction_data)
   const causeEffectValid = value.cause_effect_data === null || value.cause_effect_data === undefined || isCauseEffectData(value.cause_effect_data)
+  const numberLineValid = value.number_line_data === null || value.number_line_data === undefined || isNumberLineData(value.number_line_data)
+  const equationStepsValid = value.equation_steps_data === null || value.equation_steps_data === undefined || isEquationStepsData(value.equation_steps_data)
+  const cycleValid = value.cycle_data === null || value.cycle_data === undefined || isCycleData(value.cycle_data)
   return typeof value.title === 'string' && value.title.trim().length >= 3 && value.title.length <= 100 &&
     typeof value.narration === 'string' && value.narration.trim().length >= 5 && value.narration.length <= 1200 &&
     typeof value.caption === 'string' && value.caption.trim().length >= 3 && value.caption.length <= 300 &&
-    validVisual && executionValid && fractionValid && causeEffectValid &&
+    validVisual && executionValid && fractionValid && causeEffectValid && numberLineValid && equationStepsValid && cycleValid &&
     (value.visual_type !== 'code_execution' || isExecutionData(value.execution_data)) &&
     (value.visual_type === 'code_execution' || value.execution_data == null) &&
     (value.visual_type !== 'fraction_model' || isFractionData(value.fraction_data)) &&
     (value.visual_type === 'fraction_model' || value.fraction_data == null) &&
     (value.visual_type !== 'cause_effect' || isCauseEffectData(value.cause_effect_data)) &&
     (value.visual_type === 'cause_effect' || value.cause_effect_data == null) &&
+    (value.visual_type !== 'number_line' || isNumberLineData(value.number_line_data)) &&
+    (value.visual_type === 'number_line' || value.number_line_data == null) &&
+    (value.visual_type !== 'equation_steps' || isEquationStepsData(value.equation_steps_data)) &&
+    (value.visual_type === 'equation_steps' || value.equation_steps_data == null) &&
+    (value.visual_type !== 'cycle' || isCycleData(value.cycle_data)) &&
+    (value.visual_type === 'cycle' || value.cycle_data == null) &&
     Object.keys(value.visual_data).length <= 16 &&
     Object.entries(value.visual_data).every(([key, item]) => key.trim().length > 0 && key.length <= 40 && typeof item === 'string' && item.trim().length > 0 && item.length <= 320) &&
     typeof value.pause_seconds === 'number' && Number.isFinite(value.pause_seconds) && value.pause_seconds >= 0 && value.pause_seconds <= 1.5
@@ -180,10 +227,22 @@ function isRenderJob(value: unknown): value is RenderJob {
 function isRenderManifest(value: unknown, lesson: Lesson): value is RenderManifest {
   if (!isRecord(value) || value.lesson_id !== lesson.id || !Array.isArray(value.scenes) || value.scenes.length !== lesson.scenes.length) return false
   return value.scenes.every((raw, index) => {
-    if (!isRecord(raw) || raw.title !== lesson.scenes[index].title || !Array.isArray(raw.visual_timeline)) return false
+    if (!isRecord(raw) || raw.title !== lesson.scenes[index].title || !Array.isArray(raw.visual_timeline) || !Array.isArray(raw.captions) || raw.captions.length === 0) return false
     const finite = ['start_seconds', 'audio_seconds', 'pause_seconds', 'end_seconds'].every((key) => typeof raw[key] === 'number' && Number.isFinite(raw[key]))
     if (!finite || (raw.start_seconds as number) < 0 || (raw.audio_seconds as number) <= 0 || (raw.pause_seconds as number) < 0) return false
-    return raw.visual_timeline.every((frame) => isRecord(frame) &&
+    const audioEnd = (raw.start_seconds as number) + (raw.audio_seconds as number)
+    let previousCaptionEnd = raw.start_seconds as number
+    const captionsAreTimed = raw.captions.every((cue) => {
+      if (!isRecord(cue) || typeof cue.text !== 'string' || !cue.text.trim() || cue.text.length > 300 ||
+        typeof cue.start_seconds !== 'number' || !Number.isFinite(cue.start_seconds) ||
+        typeof cue.end_seconds !== 'number' || !Number.isFinite(cue.end_seconds)) return false
+      if (cue.start_seconds < previousCaptionEnd - 0.001 || cue.end_seconds <= cue.start_seconds ||
+        cue.end_seconds > audioEnd + 0.01) return false
+      previousCaptionEnd = cue.end_seconds
+      return true
+    })
+    return captionsAreTimed && Math.abs((raw.captions[0] as Record<string, number>).start_seconds - (raw.start_seconds as number)) < 0.01 &&
+      Math.abs(previousCaptionEnd - audioEnd) < 0.01 && raw.visual_timeline.every((frame) => isRecord(frame) &&
       typeof frame.start_progress === 'number' && typeof frame.end_progress === 'number' &&
       typeof frame.phase === 'string' && typeof frame.active_line === 'number' &&
       typeof frame.iteration === 'number' && (frame.value === null || typeof frame.value === 'string') &&
@@ -221,6 +280,8 @@ function App() {
   const [lesson, setLesson] = useState<Lesson | null>(null)
   const [activeSceneIndex, setActiveSceneIndex] = useState(0)
   const [previewProgress, setPreviewProgress] = useState(0)
+  const [captionAudioActive, setCaptionAudioActive] = useState(true)
+  const [captionText, setCaptionText] = useState('')
   const [createError, setCreateError] = useState('')
   const [notice, setNotice] = useState('')
   const [isCreating, setIsCreating] = useState(false)
@@ -265,6 +326,8 @@ function App() {
       setLesson(result)
       setActiveSceneIndex(0)
       setPreviewProgress(0)
+      setCaptionAudioActive(true)
+      setCaptionText('')
       setRenderJob(null)
       setRenderManifest(null)
       setRenderError('')
@@ -339,6 +402,11 @@ function App() {
     const timing = renderManifest.scenes[sceneIndex]
     setActiveSceneIndex(sceneIndex)
     setPreviewProgress(Math.min(1, (currentTime - timing.start_seconds) / timing.audio_seconds))
+    const activeCaption = timing.captions.find(
+      (cue) => currentTime >= cue.start_seconds && currentTime < cue.end_seconds,
+    )
+    setCaptionText(activeCaption?.text ?? '')
+    setCaptionAudioActive(Boolean(activeCaption))
   }
 
   function seekToScene(index: number, shouldPlay: boolean) {
@@ -348,6 +416,8 @@ function App() {
     video.currentTime = timing.start_seconds
     setActiveSceneIndex(index)
     setPreviewProgress(0)
+    setCaptionText(timing.captions[0]?.text ?? '')
+    setCaptionAudioActive(Boolean(timing.captions[0]))
     if (shouldPlay) {
       void video.play().catch(() => setRenderError('The browser could not start playback. Press Play on the video to continue.'))
     }
@@ -443,18 +513,21 @@ function App() {
               <div className="stage-topline"><span><span className="stage-live-dot" /> BLU CLASSROOM</span><span>SCENE {String(lesson ? activeSceneIndex + 1 : 1).padStart(2, '0')} <i>/</i> {String(lesson ? scenes.length : 1).padStart(2, '0')}</span></div>
               <div className="stage-title"><span>{lesson ? `SCENE ${String(activeSceneIndex + 1).padStart(2, '0')} · ${scene.visual_type.replace(/_/g, ' ').toUpperCase()}` : 'EXAMPLE VISUAL · NOT GENERATED'}</span><h3>{scene.title}</h3></div>
               <VisualLessonCanvas scene={scene} progress={visualProgress} timeline={currentTimeline} />
-              <div className="stage-caption"><span>CAPTION</span><p>{scene.caption}</p></div>
-              <div className="visual-scrubber"><label htmlFor="visual-progress">VISUAL STATE <span>{renderManifest ? 'SYNCED TO NARRATION' : 'PREVIEW TIMELINE'}</span></label><input id="visual-progress" type="range" min="0" max="100" value={Math.round(visualProgress * 100)} onChange={(event) => setPreviewProgress(Number(event.target.value) / 100)} aria-label="Preview visual progress" /><div className="scrubber-labels"><span>Ready</span><span>{scene.visual_type === 'code_execution' ? 'Each iteration' : 'Reveal'}</span><span>Complete</span></div></div>
+              <div className="stage-caption" aria-hidden={!captionAudioActive} style={{ visibility: captionAudioActive ? 'visible' : 'hidden' }}><span>CAPTION</span><p>{renderManifest ? captionText : scene.caption}</p></div>
+              <div className="visual-scrubber"><label htmlFor="visual-progress">VISUAL STATE <span>{renderManifest ? 'SYNCED TO NARRATION' : 'PREVIEW TIMELINE'}</span></label><input id="visual-progress" type="range" min="0" max="100" value={Math.round(visualProgress * 100)} onChange={(event) => { setPreviewProgress(Number(event.target.value) / 100); setCaptionAudioActive(true) }} aria-label="Preview visual progress" /><div className="scrubber-labels"><span>Ready</span><span>{scene.visual_type === 'code_execution' ? 'Each iteration' : 'Reveal'}</span><span>Complete</span></div></div>
 
               {lesson ? <div className="scene-controls">
                 <div className="scene-list" style={{ gridTemplateColumns: `repeat(${Math.min(lesson.scenes.length, 3)}, minmax(0, 1fr))` }}>
-                  {lesson.scenes.map((item, index) => <button key={`${lesson.id}-${index}`} type="button" className={index === activeSceneIndex ? 'scene-tab active' : 'scene-tab'} onClick={() => { setActiveSceneIndex(index); setPreviewProgress(0) }} aria-label={`Show scene ${index + 1}: ${item.title}`} aria-pressed={index === activeSceneIndex}><span className="scene-number">{String(index + 1).padStart(2, '0')}</span><span className="scene-tab-title">{item.title}</span></button>)}
+                  {lesson.scenes.map((item, index) => <button key={`${lesson.id}-${index}`} type="button" className={index === activeSceneIndex ? 'scene-tab active' : 'scene-tab'} onClick={() => { setActiveSceneIndex(index); setPreviewProgress(0); setCaptionAudioActive(true) }} aria-label={`Show scene ${index + 1}: ${item.title}`} aria-pressed={index === activeSceneIndex}><span className="scene-number">{String(index + 1).padStart(2, '0')}</span><span className="scene-tab-title">{item.title}</span></button>)}
                 </div>
                 <section className="scene-copy" aria-label={`Scene ${activeSceneIndex + 1} details`}><div><strong>NARRATION</strong><p>{scene.narration}</p></div><div><strong>VISUAL DATA · {scene.visual_type.replace(/_/g, ' ').toUpperCase()}</strong><dl>
                   {Object.entries(scene.visual_data).map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{value}</dd></div>)}
                   {scene.execution_data && <div><dt>Iterations</dt><dd>{scene.execution_data.values.join(' → ')}</dd></div>}
                   {scene.fraction_data && <><div><dt>Selected parts</dt><dd>{scene.fraction_data.numerator}</dd></div><div><dt>Equal parts</dt><dd>{scene.fraction_data.denominator}</dd></div></>}
                   {scene.cause_effect_data && <><div><dt>Inputs</dt><dd>{scene.cause_effect_data.inputs.join(' · ')}</dd></div><div><dt>Mechanism</dt><dd>{scene.cause_effect_data.mechanism}</dd></div><div><dt>Outputs</dt><dd>{scene.cause_effect_data.outputs.join(' · ')}</dd></div></>}
+                  {scene.number_line_data && <><div><dt>Start</dt><dd>{scene.number_line_data.start_value}</dd></div><div><dt>Jumps</dt><dd>{scene.number_line_data.operation_labels.join(' · ')}</dd></div><div><dt>Result</dt><dd>{scene.number_line_data.result}</dd></div></>}
+                  {scene.equation_steps_data && <><div><dt>Transformations</dt><dd>{scene.equation_steps_data.operations.join(' · ')}</dd></div><div><dt>Final equation</dt><dd>{scene.equation_steps_data.equations[scene.equation_steps_data.equations.length - 1]}</dd></div></>}
+                  {scene.cycle_data && <><div><dt>Cycle</dt><dd>{scene.cycle_data.center_label}</dd></div><div><dt>Stages</dt><dd>{scene.cycle_data.stages.join(' → ')}</dd></div></>}
                 </dl></div></section>
               </div> : <p className="example-note">This is a built-in example preview. Create a lesson to replace it with model-generated lesson content.</p>}
 

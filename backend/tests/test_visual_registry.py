@@ -146,6 +146,41 @@ def test_cause_effect_uses_bounded_inputs_mechanism_outputs():
         )
 
 
+def test_engineering_topics_get_specific_offline_visual_sequences():
+    topics = {
+        "What is RAG?": "grounded answer",
+        "How does an API request work?": "http request",
+        "What is an LLM?": "next token",
+        "What is artificial intelligence?": "useful patterns",
+        "What is machine learning?": "learns patterns",
+        "What is deep learning?": "later layers",
+        "What is a neural network?": "weighted connections",
+    }
+    for topic, expected_label in topics.items():
+        scene = Scene(
+            title="Explain the mechanism",
+            narration="Follow the information through each stage.",
+            caption="Trace how the system changes the input.",
+        )
+        selected = select_scene_visual_type(topic, scene, scene_index=1)
+        assert selected.visual_type == "process_flow"
+        assert expected_label in " ".join(selected.visual_data.values()).lower()
+        assert renderer_key(selected) == "process_flow"
+
+    training_scene = Scene(
+        title="Train a model",
+        narration="Each update uses the prediction error.",
+        caption="Examples, error, and weight updates repeat.",
+    )
+    training = select_scene_visual_type(
+        "How do you train a machine learning model?", training_scene, scene_index=1
+    )
+    assert training.visual_type == "cycle"
+    assert training.cycle_data is not None
+    assert training.cycle_data.stages[-1] == "update model weights"
+    assert renderer_key(training) == "cycle"
+
+
 def test_translation_unavailable_keeps_the_existing_hindi_sample_fallback():
     lesson = build_sample_lesson(
         LessonRequest(

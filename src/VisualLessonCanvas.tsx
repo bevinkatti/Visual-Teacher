@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 import { buildCodeExecutionTimeline, visualStateAtProgress } from './visualTimeline'
 
-export type VisualType = 'title_card' | 'flow' | 'code' | 'concept' | 'concept_diagram' | 'process_flow' | 'code_execution' | 'fraction_model' | 'cause_effect'
+export type VisualType = 'title_card' | 'flow' | 'code' | 'concept' | 'concept_diagram' | 'process_flow' | 'code_execution' | 'fraction_model' | 'cause_effect' | 'number_line' | 'equation_steps' | 'cycle'
 
 export type CodeExecutionData = {
   variable_name: string
@@ -11,6 +11,9 @@ export type CodeExecutionData = {
 
 export type FractionModelData = { numerator: number; denominator: number }
 export type CauseEffectData = { inputs: string[]; mechanism: string; outputs: string[] }
+export type NumberLineData = { start_value: number; jumps: number[]; operation_labels: string[]; result: number }
+export type EquationStepsData = { equations: string[]; operations: string[] }
+export type CycleData = { center_label: string; stages: string[] }
 
 export type VisualTimelineFrame = {
   start_progress: number
@@ -32,6 +35,9 @@ export type VisualScene = {
   execution_data?: CodeExecutionData | null
   fraction_data?: FractionModelData | null
   cause_effect_data?: CauseEffectData | null
+  number_line_data?: NumberLineData | null
+  equation_steps_data?: EquationStepsData | null
+  cycle_data?: CycleData | null
 }
 
 export type VisualState = VisualTimelineFrame
@@ -40,6 +46,11 @@ const preferredFlowKeys = ['input', 'process', 'step_2', 'step_3', 'output']
 
 function segment(progress: number, start: number, end: number) {
   return Math.max(0, Math.min(1, (progress - start) / Math.max(0.000001, end - start)))
+}
+
+function easeOutCubic(value: number) {
+  const bounded = Math.max(0, Math.min(1, value))
+  return 1 - (1 - bounded) ** 3
 }
 
 function getVisualState(scene: VisualScene, progress: number, timeline?: VisualTimelineFrame[]) {
@@ -148,6 +159,159 @@ function FractionModel({ scene, progress }: { scene: VisualScene; progress: numb
       <strong className="fraction-notation" style={{ opacity: segment(progress, 0.73, 0.84) }}>
         {data.numerator} / {data.denominator}
       </strong>
+    </div>
+  )
+}
+
+function NumberLine({ scene, progress }: { scene: VisualScene; progress: number }) {
+  const data = scene.number_line_data
+  if (!data) return <ConceptDiagram scene={scene} progress={progress} />
+  const positions = [data.start_value]
+  for (const jump of data.jumps) positions.push(positions[positions.length - 1] + jump)
+  let low = Math.max(-20, Math.min(...positions) - 1)
+  let high = Math.min(20, Math.max(...positions) + 1)
+  if (high - low < 4) {
+    const center = Math.round((low + high) / 2)
+    low = Math.max(-20, Math.min(low, center - 2))
+    high = Math.min(20, Math.max(high, center + 2))
+  }
+  const xFor = (value: number) => 88 + (value - low) * 824 / Math.max(1, high - low)
+  const axisY = 290
+  let markerValue = data.start_value
+  const jumps = data.jumps.map((_, index) => {
+    const start = positions[index]
+    const end = positions[index + 1]
+    const begin = 0.18 + index * 0.16
+    const t = easeOutCubic(segment(progress, begin, begin + 0.15))
+    if (t > 0) markerValue = start + (end - start) * t
+    const direction = end >= start ? 1 : -1
+    const controlY = axisY - direction * (44 + Math.min(36, Math.abs(end - start) * 5.9))
+    const x1 = xFor(start)
+    const x2 = xFor(end)
+    const markerY = (1 - t) ** 2 * axisY + 2 * (1 - t) * t * controlY + t ** 2 * axisY
+    return { start, end, begin, t, controlY, x1, x2, markerY, markerX: x1 + (x2 - x1) * t, label: data.operation_labels[index] }
+  })
+  let activeJump = jumps.find((jump) => jump.t < 1 && progress >= jump.begin) ?? null
+  if (progress < 0.18) markerValue = data.start_value
+  if (!activeJump && jumps.every((jump) => jump.t >= 1)) markerValue = data.result
+  const markerX = xFor(markerValue)
+  const resultReveal = segment(progress, 0.84, 0.94)
+  const labelStep = Math.max(1, Math.ceil((high - low) / 24))
+
+  return (
+    <div className="number-line-visual" role="img" aria-label={`Number line: start at ${data.start_value}, apply ${data.operation_labels.join(', ')}, and reach ${data.result}`}>
+      <svg viewBox="0 0 1000 550" aria-hidden="true" preserveAspectRatio="none">
+        <line x1="88" y1={axisY} x2="912" y2={axisY} stroke="#8a9bb2" strokeWidth="3" opacity={segment(progress, 0.06, 0.18)} />
+        {Array.from({ length: high - low + 1 }, (_, index) => low + index).map((value) => {
+          const x = xFor(value)
+          const labeled = value % labelStep === 0 || positions.includes(value)
+          return <g key={value} opacity={segment(progress, 0.06, 0.18)}>
+            <line x1={x} y1={axisY - 15} x2={x} y2={axisY + 15} stroke="#8a9bb2" strokeWidth="2" />
+            {labeled && <text x={x} y={axisY + 65} textAnchor="middle" className="number-line-tick">{value}</text>}
+          </g>
+        })}
+        {jumps.map((jump, index) => {
+          if (progress < jump.begin) return null
+          const midpoint = (jump.x1 + jump.x2) / 2
+          const labelOpacity = segment(progress, jump.begin + 0.04, jump.begin + 0.18)
+          return <g key={`${jump.start}-${jump.end}-${index}`}>
+            <path d={`M ${jump.x1} ${axisY} Q ${midpoint} ${jump.controlY} ${jump.x2} ${axisY}`} pathLength="1" stroke={index % 2 ? '#647da8' : '#3157a4'} strokeWidth="4" fill="none" strokeDasharray="1" strokeDashoffset={1 - jump.t} />
+            {jump.t >= 0.98 && <path d="M 0 0 L -11 -5 L -11 5 Z" transform={`translate(${jump.x2} ${axisY}) rotate(${Math.atan2(axisY - jump.controlY, jump.x2 - (jump.x1 + jump.x2) / 2) * 180 / Math.PI})`} fill="#3157a4" />}
+            <text x={midpoint} y={jump.controlY - 17} textAnchor="middle" className="number-line-operation" opacity={labelOpacity}>{jump.label}</text>
+          </g>
+        })}
+        {activeJump && <circle cx={activeJump.markerX} cy={activeJump.markerY} r="7" fill="#3157a4" stroke="#fff" strokeWidth="2" />}
+        {!activeJump && <circle cx={markerX} cy={axisY} r="7" fill="#3157a4" stroke="#fff" strokeWidth="2" opacity={segment(progress, 0.14, 0.28)} />}
+        <g opacity={resultReveal}>
+          <rect x="355" y="421" width="290" height="95" rx="9" fill="#edf2f9" stroke="#a7b8d0" strokeWidth="2" />
+          <text x="500" y="482" textAnchor="middle" className="number-line-result">Result: {data.result}</text>
+        </g>
+      </svg>
+    </div>
+  )
+}
+
+function EquationSteps({ scene, progress }: { scene: VisualScene; progress: number }) {
+  const data = scene.equation_steps_data
+  if (!data) return <ConceptDiagram scene={scene} progress={progress} />
+  return (
+    <div className="equation-steps-visual" role="img" aria-label={`Equation transformation: ${data.equations.join('; ')}`}>
+      <svg viewBox="0 0 1000 550" aria-hidden="true" preserveAspectRatio="none">
+        {data.equations.map((equation, index) => {
+          const begin = 0.08 + index * 0.16
+          const reveal = easeOutCubic(segment(progress, begin, begin + 0.14))
+          const y = 24 + index * 96
+          const equationFontSize = Math.max(13, Math.min(32, 430 / Math.max(1, equation.length * 0.58)))
+          const operationReveal = segment(progress, begin + 0.09, begin + 0.20)
+          return <g key={`${index}-${equation}`} opacity={reveal}>
+            {index < data.equations.length - 1 && <g opacity={segment(progress, begin + 0.1, begin + 0.22)}>
+              <path d={`M 140 ${y + 72} V ${y + 90} L 135 ${y + 84} M 140 ${y + 90} L 145 ${y + 84}`} fill="none" stroke="#7185a6" strokeWidth="3" />
+            </g>}
+            <rect x="160" y={y} width="440" height="72" rx="8" fill={index === 0 ? '#edf2f9' : '#f2f5f8'} stroke={index === 0 ? '#a7b8d0' : '#c7d2df'} strokeWidth="2" />
+            <text x="380" y={y + 45} textAnchor="middle" className="equation-step-expression" style={{ fontSize: `${equationFontSize}px` }}>{equation}</text>
+            {index < data.operations.length && <g opacity={operationReveal}>
+              <rect x="635" y={y} width="305" height="72" rx="8" fill="#f5f6f7" stroke="#cbd4df" strokeWidth="1" />
+              <text x="787" y={y + 39 - (wrappedLabel(data.operations[index], 22).length - 1) * 12} textAnchor="middle" className="equation-step-operation">
+                {wrappedLabel(data.operations[index], 22).map((line, lineIndex) => <tspan key={lineIndex} x="787" dy={lineIndex === 0 ? 0 : 24}>{line}</tspan>)}
+              </text>
+            </g>}
+          </g>
+        })}
+      </svg>
+    </div>
+  )
+}
+
+function Cycle({ scene, progress }: { scene: VisualScene; progress: number }) {
+  const data = scene.cycle_data
+  if (!data) return <ConceptDiagram scene={scene} progress={progress} />
+  const centerX = 500
+  const centerY = 250
+  const radiusX = 380
+  const radiusY = 128
+  const nodeWidth = 198
+  const nodeHeight = 60
+  const centers = data.stages.map((_, index) => {
+    const angle = -Math.PI / 2 + Math.PI * 2 * index / data.stages.length
+    return { x: centerX + radiusX * Math.cos(angle), y: centerY + radiusY * Math.sin(angle) }
+  })
+  return (
+    <div className="cycle-visual" role="img" aria-label={`${data.center_label} cycle: ${data.stages.join(', ')}`}>
+      <svg viewBox="0 0 1000 500" aria-hidden="true" preserveAspectRatio="none">
+        {centers.map((source, index) => {
+          const begin = 0.18 + index * (0.58 / centers.length)
+          const reveal = easeOutCubic(segment(progress, begin, begin + 0.12))
+          if (reveal <= 0) return null
+          const target = centers[(index + 1) % centers.length]
+          const angle = Math.atan2(target.y - source.y, target.x - source.x)
+          const x1 = source.x + (nodeWidth / 2 - 10) * Math.cos(angle)
+          const y1 = source.y + (nodeHeight / 2 - 7) * Math.sin(angle)
+          const x2 = target.x - (nodeWidth / 2 - 12) * Math.cos(angle)
+          const y2 = target.y - (nodeHeight / 2 - 9) * Math.sin(angle)
+          const headX = x1 + (x2 - x1) * reveal
+          const headY = y1 + (y2 - y1) * reveal
+          return <g key={`edge-${index}`}>
+            <line x1={x1} y1={y1} x2={headX} y2={headY} stroke="#647da8" strokeWidth="3" />
+            {reveal >= 0.95 && <path d={`M ${x2 - 9 * Math.cos(angle - .55)} ${y2 - 9 * Math.sin(angle - .55)} L ${x2} ${y2} L ${x2 - 9 * Math.cos(angle + .55)} ${y2 - 9 * Math.sin(angle + .55)} Z`} fill="#3157a4" />}
+          </g>
+        })}
+        {centers.map((center, index) => {
+          const begin = 0.08 + index * 0.10
+          const reveal = easeOutCubic(segment(progress, begin, begin + 0.15))
+          const lines = wrappedLabel(data.stages[index], 15)
+          const labelSize = lines.length > 2 ? 22 : 28
+          return <g key={`stage-${index}`} opacity={reveal}>
+            <rect x={center.x - nodeWidth / 2} y={center.y - nodeHeight / 2} width={nodeWidth} height={nodeHeight} rx="10" fill="#f1f4f8" stroke={index % 2 === 0 ? '#9caec8' : '#b4c0d1'} strokeWidth="2" />
+            <text x={center.x} y={center.y + 5 - (lines.length - 1) * labelSize * 0.55} textAnchor="middle" className="cycle-stage-label" style={{ fontSize: `${labelSize}px` }}>
+              {lines.map((line, lineIndex) => <tspan key={lineIndex} x={center.x} dy={lineIndex === 0 ? 0 : labelSize * 1.1}>{line}</tspan>)}
+            </text>
+          </g>
+        })}
+        <g opacity={segment(progress, 0.14, 0.30)}>
+          <rect x="350" y="216" width="300" height="68" rx="12" fill="#fff" stroke="#b7c4d6" strokeWidth="2" />
+          <text x="500" y="256" textAnchor="middle" className="cycle-center-label">{data.center_label}</text>
+        </g>
+      </svg>
     </div>
   )
 }
@@ -311,6 +475,9 @@ const visualRenderers: Record<string, Renderer> = {
   code_execution: ({ scene, progress, timeline }) => <CodeExecution scene={scene} progress={progress} timeline={timeline} />,
   fraction_model: ({ scene, progress }) => <FractionModel scene={scene} progress={progress} />,
   cause_effect: ({ scene, progress }) => <CauseEffect scene={scene} progress={progress} />,
+  number_line: ({ scene, progress }) => <NumberLine scene={scene} progress={progress} />,
+  equation_steps: ({ scene, progress }) => <EquationSteps scene={scene} progress={progress} />,
+  cycle: ({ scene, progress }) => <Cycle scene={scene} progress={progress} />,
 }
 
 export function VisualLessonCanvas({
@@ -325,7 +492,10 @@ export function VisualLessonCanvas({
   const key = scene.visual_type === 'code_execution' && !scene.execution_data ? 'code'
     : scene.visual_type === 'fraction_model' && !scene.fraction_data ? 'concept_diagram'
       : scene.visual_type === 'cause_effect' && !scene.cause_effect_data ? 'concept_diagram'
-        : scene.visual_type
+        : scene.visual_type === 'number_line' && !scene.number_line_data ? 'concept_diagram'
+          : scene.visual_type === 'equation_steps' && !scene.equation_steps_data ? 'concept_diagram'
+            : scene.visual_type === 'cycle' && !scene.cycle_data ? 'concept_diagram'
+              : scene.visual_type
   const RendererComponent = visualRenderers[key] ?? visualRenderers.concept_diagram
   return <div className="visual-frame">{RendererComponent({ scene, progress, timeline })}</div>
 }
