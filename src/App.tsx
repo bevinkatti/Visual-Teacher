@@ -1,18 +1,28 @@
 import { useEffect, useRef, useState, type SyntheticEvent } from 'react'
 import {
   VisualLessonCanvas,
+  type CauseEffectData,
   type CodeExecutionData,
+  type FractionModelData,
   type VisualScene,
   type VisualTimelineFrame,
 } from './VisualLessonCanvas'
 import './App.css'
 
 type LessonSource = 'ollama' | 'sample'
-type FallbackReason = 'unavailable' | 'timeout' | 'http_error' | 'invalid_output' | null
+type FallbackReason =
+  | 'unavailable'
+  | 'timeout'
+  | 'http_error'
+  | 'invalid_output'
+  | 'translation_unavailable'
+  | null
 
 type LessonScene = VisualScene & {
   pause_seconds: number
   execution_data?: CodeExecutionData | null
+  fraction_data?: FractionModelData | null
+  cause_effect_data?: CauseEffectData | null
 }
 
 type Lesson = {
@@ -33,6 +43,8 @@ type RenderJob = {
   status: 'queued' | 'rendering' | 'completed' | 'failed'
   output_filename: string
   duration_seconds: number | null
+  target_duration_seconds: number | null
+  duration_within_tolerance: boolean | null
   video_url: string | null
   download_url: string | null
   captions_url: string | null
@@ -57,6 +69,7 @@ const fallbackMessages: Record<Exclude<FallbackReason, null>, string> = {
   timeout: 'Ollama did not finish before the configured timeout.',
   http_error: 'Ollama returned an HTTP error.',
   invalid_output: 'Ollama returned a lesson that failed validation.',
+  translation_unavailable: 'Local translation into the requested language was unavailable; showing the built-in sample lesson.',
 }
 
 const initialExample: LessonScene = {
@@ -87,16 +100,39 @@ function isExecutionData(value: unknown): value is CodeExecutionData {
     value.values.every((item) => typeof item === 'string' && item.trim().length > 0 && item.length <= 32 && !Array.from(item).some((character) => character.charCodeAt(0) < 32))
 }
 
+function isFractionData(value: unknown): value is FractionModelData {
+  return isRecord(value) && Object.keys(value).length === 2 &&
+    typeof value.numerator === 'number' && Number.isInteger(value.numerator) && value.numerator >= 1 && value.numerator <= 8 &&
+    typeof value.denominator === 'number' && Number.isInteger(value.denominator) && value.denominator >= 2 && value.denominator <= 8 &&
+    value.numerator <= value.denominator
+}
+
+function isCauseEffectData(value: unknown): value is CauseEffectData {
+  const validLabels = (labels: unknown, minimum: number, maximum: number) =>
+    Array.isArray(labels) && labels.length >= minimum && labels.length <= maximum &&
+    labels.every((label) => typeof label === 'string' && label.trim().length > 0 && label.length <= 48 && !Array.from(label).some((character) => character.charCodeAt(0) < 32))
+  return isRecord(value) && Object.keys(value).length === 3 &&
+    validLabels(value.inputs, 2, 3) && validLabels(value.outputs, 1, 2) &&
+    typeof value.mechanism === 'string' && value.mechanism.trim().length > 0 && value.mechanism.length <= 48 &&
+    !Array.from(value.mechanism).some((character) => character.charCodeAt(0) < 32)
+}
+
 function isScene(value: unknown): value is LessonScene {
   if (!isRecord(value) || !isRecord(value.visual_data)) return false
-  const validVisual = ['concept', 'flow', 'code', 'concept_diagram', 'process_flow', 'code_execution'].includes(String(value.visual_type))
+  const validVisual = ['title_card', 'concept', 'flow', 'code', 'concept_diagram', 'process_flow', 'code_execution', 'fraction_model', 'cause_effect'].includes(String(value.visual_type))
   const executionValid = value.execution_data === null || value.execution_data === undefined || isExecutionData(value.execution_data)
+  const fractionValid = value.fraction_data === null || value.fraction_data === undefined || isFractionData(value.fraction_data)
+  const causeEffectValid = value.cause_effect_data === null || value.cause_effect_data === undefined || isCauseEffectData(value.cause_effect_data)
   return typeof value.title === 'string' && value.title.trim().length >= 3 && value.title.length <= 100 &&
     typeof value.narration === 'string' && value.narration.trim().length >= 5 && value.narration.length <= 1200 &&
     typeof value.caption === 'string' && value.caption.trim().length >= 3 && value.caption.length <= 300 &&
-    validVisual && executionValid &&
+    validVisual && executionValid && fractionValid && causeEffectValid &&
     (value.visual_type !== 'code_execution' || isExecutionData(value.execution_data)) &&
     (value.visual_type === 'code_execution' || value.execution_data == null) &&
+    (value.visual_type !== 'fraction_model' || isFractionData(value.fraction_data)) &&
+    (value.visual_type === 'fraction_model' || value.fraction_data == null) &&
+    (value.visual_type !== 'cause_effect' || isCauseEffectData(value.cause_effect_data)) &&
+    (value.visual_type === 'cause_effect' || value.cause_effect_data == null) &&
     Object.keys(value.visual_data).length <= 16 &&
     Object.entries(value.visual_data).every(([key, item]) => key.trim().length > 0 && key.length <= 40 && typeof item === 'string' && item.trim().length > 0 && item.length <= 320) &&
     typeof value.pause_seconds === 'number' && Number.isFinite(value.pause_seconds) && value.pause_seconds >= 0 && value.pause_seconds <= 1.5
@@ -112,7 +148,7 @@ function isLesson(value: unknown): value is Lesson {
     typeof value.topic === 'string' &&
     (value.level === 'beginner' || value.level === 'intermediate') &&
     (value.language === 'en' || value.language === 'hi' || value.language === 'kn') &&
-    (value.target_duration_seconds === 30 || value.target_duration_seconds === 60 || value.target_duration_seconds === 90) &&
+    (value.target_duration_seconds === 30 || value.target_duration_seconds === 45 || value.target_duration_seconds === 60 || value.target_duration_seconds === 90) &&
     (value.source === 'ollama' || value.source === 'sample') && typeof value.fallback === 'boolean' &&
     (value.fallback_reason === null || value.fallback_reason === 'unavailable' || value.fallback_reason === 'timeout' || value.fallback_reason === 'http_error' || value.fallback_reason === 'invalid_output') &&
     plannerStatus && value.scenes.length >= 3 && value.scenes.length <= 6 && value.scenes.every(isScene)
@@ -181,7 +217,7 @@ function App() {
   const [topic, setTopic] = useState('How Python for-loops work')
   const [level, setLevel] = useState<'beginner' | 'intermediate'>('beginner')
   const [language, setLanguage] = useState<'en' | 'hi' | 'kn'>('en')
-  const [duration, setDuration] = useState<'30' | '60' | '90'>('30')
+  const [duration, setDuration] = useState<'30' | '45' | '60' | '90'>('30')
   const [lesson, setLesson] = useState<Lesson | null>(null)
   const [activeSceneIndex, setActiveSceneIndex] = useState(0)
   const [previewProgress, setPreviewProgress] = useState(0)
@@ -381,7 +417,7 @@ function App() {
               </div></div>
 
               <div className="field-row">
-                <div className="field-block"><label className="field-label" htmlFor="duration">LESSON LENGTH</label><div className="select-wrap"><select id="duration" value={duration} onChange={(event) => setDuration(event.target.value as '30' | '60' | '90')}><option value="30">30 seconds</option><option value="60">60 seconds</option><option value="90">90 seconds</option></select><span aria-hidden="true">⌄</span></div></div>
+                <div className="field-block"><label className="field-label" htmlFor="duration">LESSON LENGTH</label><div className="select-wrap"><select id="duration" value={duration} onChange={(event) => setDuration(event.target.value as '30' | '45' | '60' | '90')}><option value="30">30 seconds</option><option value="45">45 seconds</option><option value="60">60 seconds</option><option value="90">90 seconds</option></select><span aria-hidden="true">⌄</span></div></div>
                 <div className="field-block"><label className="field-label" htmlFor="language">LESSON LANGUAGE</label><div className="select-wrap"><select id="language" value={language} onChange={(event) => setLanguage(event.target.value as 'en' | 'hi' | 'kn')}>{languages.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select><span aria-hidden="true">⌄</span></div></div>
               </div>
               <p className="language-note"><span aria-hidden="true">文</span><span><strong>Local voice support:</strong> English and Devanagari Hindi. Kannada is unavailable; Indian-accent English is not yet verified.</span></p>
@@ -414,17 +450,22 @@ function App() {
                 <div className="scene-list" style={{ gridTemplateColumns: `repeat(${Math.min(lesson.scenes.length, 3)}, minmax(0, 1fr))` }}>
                   {lesson.scenes.map((item, index) => <button key={`${lesson.id}-${index}`} type="button" className={index === activeSceneIndex ? 'scene-tab active' : 'scene-tab'} onClick={() => { setActiveSceneIndex(index); setPreviewProgress(0) }} aria-label={`Show scene ${index + 1}: ${item.title}`} aria-pressed={index === activeSceneIndex}><span className="scene-number">{String(index + 1).padStart(2, '0')}</span><span className="scene-tab-title">{item.title}</span></button>)}
                 </div>
-                <section className="scene-copy" aria-label={`Scene ${activeSceneIndex + 1} details`}><div><strong>NARRATION</strong><p>{scene.narration}</p></div><div><strong>VISUAL DATA · {scene.visual_type.replace(/_/g, ' ').toUpperCase()}</strong><dl>{Object.entries(scene.visual_data).map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{value}</dd></div>)}{scene.execution_data && <div><dt>Iterations</dt><dd>{scene.execution_data.values.join(' → ')}</dd></div>}</dl></div></section>
+                <section className="scene-copy" aria-label={`Scene ${activeSceneIndex + 1} details`}><div><strong>NARRATION</strong><p>{scene.narration}</p></div><div><strong>VISUAL DATA · {scene.visual_type.replace(/_/g, ' ').toUpperCase()}</strong><dl>
+                  {Object.entries(scene.visual_data).map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{value}</dd></div>)}
+                  {scene.execution_data && <div><dt>Iterations</dt><dd>{scene.execution_data.values.join(' → ')}</dd></div>}
+                  {scene.fraction_data && <><div><dt>Selected parts</dt><dd>{scene.fraction_data.numerator}</dd></div><div><dt>Equal parts</dt><dd>{scene.fraction_data.denominator}</dd></div></>}
+                  {scene.cause_effect_data && <><div><dt>Inputs</dt><dd>{scene.cause_effect_data.inputs.join(' · ')}</dd></div><div><dt>Mechanism</dt><dd>{scene.cause_effect_data.mechanism}</dd></div><div><dt>Outputs</dt><dd>{scene.cause_effect_data.outputs.join(' · ')}</dd></div></>}
+                </dl></div></section>
               </div> : <p className="example-note">This is a built-in example preview. Create a lesson to replace it with model-generated lesson content.</p>}
 
               {renderJob && <section className="render-panel" aria-live="polite" aria-label="MP4 render status">
                 <div className="render-panel-heading"><div><span className="step-label">03 / LISTEN & PLAY</span><h3>Rendered lesson</h3></div><span className={`render-state render-state-${renderJob.status}`}>{renderJob.status.toUpperCase()}</span></div>
                 <p className="render-filename">{renderJob.output_filename}</p>
                 {renderJob.status === 'queued' && <p role="status">Render queued. Media will be available after synthesis and export finish.</p>}
-                {renderJob.status === 'rendering' && <p role="status">Local narration, captions, and video are being generated. This can take a few minutes.</p>}
+                {renderJob.status === 'rendering' && <p role="status">{lesson?.language === 'kn' ? 'Kannada narration uses the local Indic Parler-TTS voice, which is slower on CPU. This can take 10–20 minutes.' : 'Local narration, captions, and video are being generated. This can take a few minutes.'}</p>}
                 {renderJob.status === 'failed' && <p className="notice-error" role="alert">{renderJob.error ?? 'The render failed. Retry when ready.'}</p>}
                 {renderJob.status === 'completed' && renderJob.video_url && renderJob.download_url && renderJob.captions_url && <>
-                  <p className="render-complete">Completed · {renderJob.duration_seconds?.toFixed(2)} seconds{renderManifest ? ' · visual preview synced to the exported timing manifest' : ''}</p>
+                  <p className="render-complete">Completed · {renderJob.duration_seconds?.toFixed(2)} seconds{renderJob.target_duration_seconds ? ` (target ${renderJob.target_duration_seconds}s${renderJob.duration_within_tolerance === false ? ' · over target' : ' · on target'})` : ''}{renderManifest ? ' · visual preview synced to the exported timing manifest' : ''}</p>
                   <video ref={videoRef} className="lesson-video" controls playsInline preload="metadata" src={renderJob.video_url} onTimeUpdate={syncPreviewToVideo} aria-label="Generated lesson video" />
                   {renderManifest && <div className="video-scene-controls" aria-label="Video scene controls">
                     <button type="button" onClick={nextVideoScene} disabled={activeSceneIndex >= renderManifest.scenes.length - 1}>Next scene</button>

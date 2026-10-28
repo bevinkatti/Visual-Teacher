@@ -1,0 +1,11 @@
+1
+00:00:00,000 --> 00:00:11,828
+A for loop gives each list item one turn.
+
+2
+00:00:12,178 --> 00:00:22,877
+fruit changes on each pass; output grows one line at a time.
+
+3
+00:00:23,227 --> 00:00:29,922
+Three items produce three lines; no next item means stop.

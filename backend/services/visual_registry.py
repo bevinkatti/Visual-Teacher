@@ -22,23 +22,42 @@ def select_scene_visual_type(topic: str, scene: Scene) -> Scene:
     """Keep code-focused visuals for code topics; use concept visuals elsewhere."""
     if is_programming_topic(topic):
         if scene.execution_data is not None:
-            return scene.model_copy(update={"visual_type": "code_execution"})
+            return scene.model_copy(
+                update={
+                    "visual_type": "code_execution",
+                    "fraction_data": None,
+                    "cause_effect_data": None,
+                }
+            )
         return scene
     if scene.visual_type in {"code", "code_execution"}:
         return scene.model_copy(
-            update={"visual_type": "concept_diagram", "execution_data": None}
+            update={
+                "visual_type": "concept_diagram",
+                "execution_data": None,
+                "fraction_data": None,
+                "cause_effect_data": None,
+            }
         )
     return scene
 
 
 def renderer_key(scene: Scene) -> str:
     """Resolve both current names and legacy names to a typed renderer key."""
+    if scene.visual_type == "title_card":
+        return "title_card"
     if scene.visual_type in {"concept", "concept_diagram"}:
         return "concept_diagram"
     if scene.visual_type in {"flow", "process_flow"}:
         return "process_flow"
     if scene.visual_type == "code_execution" and scene.execution_data is not None:
         return "code_execution"
+    if scene.visual_type == "fraction_model" and scene.fraction_data is not None:
+        return "fraction_model"
+    if scene.visual_type == "cause_effect" and scene.cause_effect_data is not None:
+        return "cause_effect"
+    if scene.visual_type in {"fraction_model", "cause_effect"}:
+        return "concept_diagram"
     return "legacy_code"
 
 

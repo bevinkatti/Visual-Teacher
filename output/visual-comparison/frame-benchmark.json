@@ -1,0 +1,30 @@
+{
+  "generic_concept": {
+    "frames": 150,
+    "elapsed_seconds": 0.485,
+    "milliseconds_per_frame": 3.233,
+    "720_frame_estimate_seconds": 2.328,
+    "over_generic_percent": 0.0
+  },
+  "fraction_model": {
+    "frames": 150,
+    "elapsed_seconds": 0.392,
+    "milliseconds_per_frame": 2.611,
+    "720_frame_estimate_seconds": 1.88,
+    "over_generic_percent": -19.2
+  },
+  "cause_effect": {
+    "frames": 150,
+    "elapsed_seconds": 0.453,
+    "milliseconds_per_frame": 3.02,
+    "720_frame_estimate_seconds": 2.175,
+    "over_generic_percent": -6.6
+  },
+  "code_execution": {
+    "frames": 150,
+    "elapsed_seconds": 0.673,
+    "milliseconds_per_frame": 4.484,
+    "720_frame_estimate_seconds": 3.229,
+    "over_generic_percent": 38.7
+  }
+}

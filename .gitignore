@@ -55,6 +55,10 @@ output/videos/
 output/inspection/
 output/audio/
 output/tmp/
+output/bench/
+output/measurements/
+output/pytest-tmp-clean/
+output/*.txt
 *.wav
 
 # Local runtime data
@@ -90,3 +94,12 @@ output/tmp/
 # Additional caches
 .mypy_cache/
 .ruff_cache/
+
+# Generated build artifacts
+output/*-dist/
+output/pytest-tmp/
+output/pytest-run/
+output/videos/
+output/inspection/
+output/audio/
+output/tmp/

@@ -1,0 +1,156 @@
+{
+  "lesson_id": "2eeced6ce9b4",
+  "topic": "How does a Python loop work?",
+  "source": "sample",
+  "voice": "hf_alpha",
+  "voice_language": "en-us",
+  "audio_sample_rate_hz": 24000,
+  "duration_seconds": 30.272,
+  "target_duration_seconds": 30,
+  "duration_within_tolerance": true,
+  "speech_seconds": 29.222,
+  "pause_seconds": 1.05,
+  "duration_corrections": [],
+  "dimensions": [
+    1280,
+    720
+  ],
+  "frame_rate": "24/1",
+  "video_codec": "h264",
+  "audio_codec": "aac",
+  "timing_basis": "Measured duration of each synthesized scene WAV plus the validated scene pause; narration is budgeted against the requested target duration.",
+  "stages_seconds": {
+    "tts_initialization": 1.4059999999990396,
+    "narration": 0.0,
+    "tts_synthesis": 0.0,
+    "scene_render": 11.906000000002678,
+    "encode": 5.73399999999674,
+    "ffprobe_verification": 0.39100000000325963,
+    "total": 18.07800000000134
+  },
+  "scenes": [
+    {
+      "title": "One loop, one turn per item",
+      "start_seconds": 0.0,
+      "audio_seconds": 11.828,
+      "pause_seconds": 0.35,
+      "end_seconds": 12.177999999999999,
+      "visual_timeline": []
+    },
+    {
+      "title": "Watch each pass update the output",
+      "start_seconds": 12.177999999999999,
+      "audio_seconds": 10.698666666666666,
+      "pause_seconds": 0.35,
+      "end_seconds": 23.226666666666667,
+      "visual_timeline": [
+        {
+          "start_progress": 0.0,
+          "end_progress": 0.1,
+          "phase": "ready",
+          "active_line": 1,
+          "iteration": 0,
+          "value": null,
+          "output": [],
+          "status": "Ready to begin"
+        },
+        {
+          "start_progress": 0.1,
+          "end_progress": 0.20133333333333334,
+          "phase": "next_value",
+          "active_line": 1,
+          "iteration": 1,
+          "value": "apple",
+          "output": [],
+          "status": "Read item 1 of 3"
+        },
+        {
+          "start_progress": 0.20133333333333334,
+          "end_progress": 0.3666666666666667,
+          "phase": "run_body",
+          "active_line": 2,
+          "iteration": 1,
+          "value": "apple",
+          "output": [
+            "apple"
+          ],
+          "status": "Print apple"
+        },
+        {
+          "start_progress": 0.3666666666666667,
+          "end_progress": 0.468,
+          "phase": "next_value",
+          "active_line": 1,
+          "iteration": 2,
+          "value": "pear",
+          "output": [
+            "apple"
+          ],
+          "status": "Read item 2 of 3"
+        },
+        {
+          "start_progress": 0.468,
+          "end_progress": 0.6333333333333333,
+          "phase": "run_body",
+          "active_line": 2,
+          "iteration": 2,
+          "value": "pear",
+          "output": [
+            "apple",
+            "pear"
+          ],
+          "status": "Print pear"
+        },
+        {
+          "start_progress": 0.6333333333333333,
+          "end_progress": 0.7346666666666666,
+          "phase": "next_value",
+          "active_line": 1,
+          "iteration": 3,
+          "value": "plum",
+          "output": [
+            "apple",
+            "pear"
+          ],
+          "status": "Read item 3 of 3"
+        },
+        {
+          "start_progress": 0.7346666666666666,
+          "end_progress": 0.8999999999999999,
+          "phase": "run_body",
+          "active_line": 2,
+          "iteration": 3,
+          "value": "plum",
+          "output": [
+            "apple",
+            "pear",
+            "plum"
+          ],
+          "status": "Print plum"
+        },
+        {
+          "start_progress": 0.9,
+          "end_progress": 1.0,
+          "phase": "complete",
+          "active_line": 1,
+          "iteration": 3,
+          "value": null,
+          "output": [
+            "apple",
+            "pear",
+            "plum"
+          ],
+          "status": "No values remain \u00b7 loop stops"
+        }
+      ]
+    },
+    {
+      "title": "No next value means the loop stops",
+      "start_seconds": 23.226666666666667,
+      "audio_seconds": 6.695333333333333,
+      "pause_seconds": 0.35,
+      "end_seconds": 30.272000000000002,
+      "visual_timeline": []
+    }
+  ]
+}

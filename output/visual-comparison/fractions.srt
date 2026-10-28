@@ -1,0 +1,11 @@
+1
+00:00:00,000 --> 00:00:12,512
+The denominator counts equal pieces; the numerator counts selected pieces.
+
+2
+00:00:12,862 --> 00:00:22,396
+Four equal parts make the whole; three selected parts are 3/4.
+
+3
+00:00:22,746 --> 00:00:29,627
+Numerator: selected pieces. Denominator: all equal pieces.

@@ -1,0 +1,57 @@
+{
+  "lesson_id": "ac8590476415",
+  "topic": "How do fractions show parts of a whole?",
+  "source": "sample",
+  "voice": "hf_alpha",
+  "voice_language": "en-us",
+  "audio_sample_rate_hz": 24000,
+  "duration_seconds": 29.977333,
+  "target_duration_seconds": 30,
+  "duration_within_tolerance": true,
+  "speech_seconds": 28.927,
+  "pause_seconds": 1.05,
+  "duration_corrections": [],
+  "dimensions": [
+    1280,
+    720
+  ],
+  "frame_rate": "24/1",
+  "video_codec": "h264",
+  "audio_codec": "aac",
+  "timing_basis": "Measured duration of each synthesized scene WAV plus the validated scene pause; narration is budgeted against the requested target duration.",
+  "stages_seconds": {
+    "tts_initialization": 1.4059999999990396,
+    "narration": 46.56300000000192,
+    "tts_synthesis": 46.56300000000192,
+    "scene_render": 11.0,
+    "encode": 5.563000000001921,
+    "ffprobe_verification": 0.046999999998661224,
+    "total": 63.23500000000058
+  },
+  "scenes": [
+    {
+      "title": "Fractions divide one whole equally",
+      "start_seconds": 0.0,
+      "audio_seconds": 12.512,
+      "pause_seconds": 0.35,
+      "end_seconds": 12.862,
+      "visual_timeline": []
+    },
+    {
+      "title": "Shade three of four equal parts",
+      "start_seconds": 12.862,
+      "audio_seconds": 9.534,
+      "pause_seconds": 0.35,
+      "end_seconds": 22.746000000000002,
+      "visual_timeline": []
+    },
+    {
+      "title": "Read the numerator over the denominator",
+      "start_seconds": 22.746000000000002,
+      "audio_seconds": 6.881333333333333,
+      "pause_seconds": 0.35,
+      "end_seconds": 29.977333333333338,
+      "visual_timeline": []
+    }
+  ]
+}

@@ -1,0 +1,57 @@
+{
+  "lesson_id": "77d5db013555",
+  "topic": "How does photosynthesis work?",
+  "source": "sample",
+  "voice": "hf_alpha",
+  "voice_language": "en-us",
+  "audio_sample_rate_hz": 24000,
+  "duration_seconds": 31.417958,
+  "target_duration_seconds": 30,
+  "duration_within_tolerance": true,
+  "speech_seconds": 30.368,
+  "pause_seconds": 1.05,
+  "duration_corrections": [],
+  "dimensions": [
+    1280,
+    720
+  ],
+  "frame_rate": "24/1",
+  "video_codec": "h264",
+  "audio_codec": "aac",
+  "timing_basis": "Measured duration of each synthesized scene WAV plus the validated scene pause; narration is budgeted against the requested target duration.",
+  "stages_seconds": {
+    "tts_initialization": 1.4059999999990396,
+    "narration": 49.09400000000096,
+    "tts_synthesis": 49.09400000000096,
+    "scene_render": 11.937999999998283,
+    "encode": 5.625,
+    "ffprobe_verification": 0.0470000000022992,
+    "total": 66.7970000000023
+  },
+  "scenes": [
+    {
+      "title": "Plants use light to make sugars",
+      "start_seconds": 0.0,
+      "audio_seconds": 10.912,
+      "pause_seconds": 0.35,
+      "end_seconds": 11.262,
+      "visual_timeline": []
+    },
+    {
+      "title": "Inputs enter; products leave",
+      "start_seconds": 11.262,
+      "audio_seconds": 9.812625,
+      "pause_seconds": 0.35,
+      "end_seconds": 21.424625000000002,
+      "visual_timeline": []
+    },
+    {
+      "title": "Track the matter through the leaf",
+      "start_seconds": 21.424625000000002,
+      "audio_seconds": 9.643333333333333,
+      "pause_seconds": 0.35,
+      "end_seconds": 31.41795833333334,
+      "visual_timeline": []
+    }
+  ]
+}

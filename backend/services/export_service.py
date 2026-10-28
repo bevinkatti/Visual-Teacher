@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import math
 import os
 import shutil
@@ -18,6 +19,15 @@ import numpy as np
 import soundfile as sf
 
 from backend.schemas import Lesson, Scene
+from backend.services.duration_budget import (
+    DurationBudgetError,
+    enforce_narration_budget,
+    narrator_engine,
+    speech_budget_seconds,
+    spoken_length,
+    tolerance_seconds,
+    trim_to_char_budget,
+)
 from backend.services.scene_renderer import HEIGHT, WIDTH, SceneRenderer
 from backend.services.visual_registry import (
     build_code_execution_timeline,
@@ -27,6 +37,7 @@ from backend.services.visual_registry import (
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 FPS = 24
+logger = logging.getLogger(__name__)
 
 
 class Narrator(Protocol):
@@ -55,6 +66,11 @@ class ExportResult:
     audio_codec: str
     stage_seconds: dict[str, float]
     timeline: list[TimelineEntry]
+    target_duration_seconds: int = 0
+    within_tolerance: bool = True
+    duration_corrections: list[dict[str, object]] | None = None
+    speech_seconds: float = 0.0
+    pause_seconds: float = 0.0
 
 
 def build_timeline(scenes: list[Scene], measured_audio_seconds: list[float]) -> list[TimelineEntry]:
@@ -209,6 +225,8 @@ def export_lesson(
     language: str = "en-us",
     speed: float = 1.0,
     ffmpeg_path: str | None = None,
+    upstream_stage_seconds: dict[str, float] | None = None,
+    narration_grow_pool: dict[int, list[str]] | None = None,
 ) -> ExportResult:
     """Synthesize, measure, render, and export one lesson without fixed scene timings."""
     output_path = output_path.resolve()
@@ -225,29 +243,162 @@ def export_lesson(
     stage_seconds: dict[str, float] = {
         "tts_initialization": float(getattr(narrator, "initialization_seconds", 0.0))
     }
+    if upstream_stage_seconds:
+        stage_seconds.update(upstream_stage_seconds)
     total_start = time.monotonic()
-    audio_start = time.monotonic()
+    target = lesson.target_duration_seconds
+    engine = narrator_engine(narrator)
+    # The selected duration is a real budget: trim over-length narration before
+    # any expensive synthesis, and record every correction for the manifest.
+    working_lesson, duration_corrections = enforce_narration_budget(lesson, engine)
+    working_scenes: list[Scene] = list(working_lesson.scenes)
     generated: list[tuple[np.ndarray, int]] = []
-    for scene in lesson.scenes:
-        generated.append(
-            narrator.synthesize(scene.narration, voice=voice, language=language, speed=speed)
+
+    def _synthesize(index: int) -> tuple[np.ndarray, int]:
+        synthesis_start = time.monotonic()
+        audio = narrator.synthesize(
+            working_scenes[index].narration, voice=voice, language=language, speed=speed
         )
-    stage_seconds["narration"] = time.monotonic() - audio_start
+        stage_seconds["narration"] = stage_seconds.get("narration", 0.0) + (
+            time.monotonic() - synthesis_start
+        )
+        return audio
+
+    stage_seconds["narration"] = 0.0
+    for index in range(len(working_scenes)):
+        generated.append(_synthesize(index))
     stage_seconds["tts_synthesis"] = stage_seconds["narration"]
 
     with tempfile.TemporaryDirectory(prefix="blu-lesson-", dir=output_path.parent) as temp:
         work_dir = Path(temp)
         audio_path = work_dir / "narration.wav"
-        measured: list[float] = []
-        for index in range(len(lesson.scenes)):
-            # Audio slices are recorded exactly in the PCM file; reread each isolated
-            # utterance duration before establishing the timeline.
-            samples, rate = generated[index]
-            isolated_path = work_dir / f"scene-{index:02d}.wav"
-            sf.write(isolated_path, samples, rate, subtype="PCM_16")
-            measured.append(float(sf.info(isolated_path).duration))
-        timeline = build_timeline(lesson.scenes, measured)
+
+        def _measure_and_build_timeline() -> tuple[list[float], list[TimelineEntry]]:
+            measured: list[float] = []
+            for index in range(len(working_scenes)):
+                # Audio slices are recorded exactly in the PCM file; reread each isolated
+                # utterance duration before establishing the timeline.
+                samples, rate = generated[index]
+                isolated_path = work_dir / f"scene-{index:02d}.wav"
+                sf.write(isolated_path, samples, rate, subtype="PCM_16")
+                measured.append(float(sf.info(isolated_path).duration))
+            return measured, build_timeline(working_scenes, measured)
+
+        measured, timeline = _measure_and_build_timeline()
+        tolerance = tolerance_seconds(target)
+
+        def run_measured_growth() -> None:
+            """Grow under-running scenes from the authored pool using MEASURED
+            per-scene speaking rates. One sentence per scene per sweep, with a
+            real re-measure after every addition (per-sentence rates vary far
+            too much for stale numbers to bound the budget). The shrink pass
+            still guards against overshoot afterwards.
+            """
+            nonlocal measured, timeline
+            if not narration_grow_pool:
+                return
+            if timeline[-1].end_seconds >= target * 0.90:
+                return
+            budget_speech = speech_budget_seconds(working_lesson)
+            # Pacing cap keeps scenes balanced, but with real headroom: a long
+            # pooled sentence must still be addable, otherwise growth starves
+            # while the budget has room and the lesson lands far under target.
+            share = budget_speech / max(1, len(working_scenes))
+            scene_cap = max(3.0, share * 1.35, share + 6.0)
+            grew = True
+            while grew:
+                grew = False
+                for index in sorted(narration_grow_pool):
+                    pool = narration_grow_pool.get(index)
+                    if not pool:
+                        continue
+                    if measured[index] <= 0.05:
+                        continue
+                    scene_rate = (
+                        spoken_length(working_scenes[index].narration) / measured[index]
+                    )
+                    sentence = pool[0]
+                    projected = spoken_length(sentence) / scene_rate
+                    logger.debug(
+                        "grow try scene=%d measured=%.2f projected=%.2f cap=%.2f sum=%.2f budget=%.2f pool=%d",
+                        index, measured[index], projected, scene_cap,
+                        sum(measured), budget_speech, len(pool),
+                    )
+                    if measured[index] + projected > scene_cap:
+                        logger.debug("grow skip scene=%d (scene cap)", index)
+                        continue
+                    if sum(measured) + projected > budget_speech:
+                        logger.debug("grow skip scene=%d (budget)", index)
+                        continue
+                    del pool[0]
+                    working_scenes[index] = working_scenes[index].model_copy(
+                        update={
+                            "narration": f"{working_scenes[index].narration} {sentence}".strip()
+                        }
+                    )
+                    generated[index] = _synthesize(index)
+                    duration_corrections.append(
+                        {
+                            "stage": "post_growth",
+                            "scene_index": index,
+                            "added_sentence": sentence,
+                            "scene_rate_chars_per_second": round(scene_rate, 2),
+                        }
+                    )
+                    grew = True
+                    # Re-measure after EVERY addition: one sentence can swing
+                    # the composition's pace, and an overshooting sweep would
+                    # trigger the shrink pass and undo the growth.
+                    measured, timeline = _measure_and_build_timeline()
+
+        run_measured_growth()
+
+        if timeline[-1].end_seconds > tolerance:
+            # One controlled correction: rebuild scene budgets from the measured
+            # audio, trim only what still does not fit, and re-synthesize exactly
+            # those scenes. If even one sentence per scene cannot fit, fail loudly
+            # instead of silently exporting an oversized video.
+            scale = speech_budget_seconds(working_lesson) / sum(measured)
+            for index, scene in enumerate(working_scenes):
+                new_budget = int(spoken_length(scene.narration) * scale)
+                if new_budget >= spoken_length(scene.narration):
+                    continue
+                trimmed, dropped = trim_to_char_budget(scene.narration, new_budget)
+                if spoken_length(trimmed) >= spoken_length(scene.narration):
+                    continue
+                trimmed_caption, _ = trim_to_char_budget(scene.caption, spoken_length(trimmed))
+                duration_corrections.append(
+                    {
+                        "stage": "post_synthesis",
+                        "scene_index": index,
+                        "measured_audio_seconds": round(measured[index], 2),
+                        "budget_characters": new_budget,
+                        "dropped_sentences": dropped,
+                    }
+                )
+                working_scenes[index] = scene.model_copy(
+                    update={"narration": trimmed, "caption": trimmed_caption}
+                )
+                generated[index] = _synthesize(index)
+            measured, timeline = _measure_and_build_timeline()
+            # Shrinking by whole sentences can undershoot (kept sentences may
+            # speak faster than the dropped ones); top back up from the pool.
+            run_measured_growth()
+            logger.info(
+                "duration: after measured correction total=%.2f tolerance=%.2f corrections=%d",
+                timeline[-1].end_seconds, tolerance, len(duration_corrections),
+            )
+            if timeline[-1].end_seconds > tolerance:
+                raise DurationBudgetError(
+                    f"Narration for a {target}-second lesson still measures "
+                    f"{timeline[-1].end_seconds:.1f}s after budget trimming; refusing to "
+                    "export an oversized video. Pick a longer target or a shorter topic."
+                )
+
+        speech_seconds = sum(measured)
+        total_pauses = sum(scene.pause_seconds for scene in working_scenes)
         _make_audio(generated, timeline, audio_path)
+        working_lesson = working_lesson.model_copy(update={"scenes": working_scenes})
         visual_timelines = [
             build_code_execution_timeline(entry.scene.execution_data)
             if entry.scene.visual_type == "code_execution" and entry.scene.execution_data is not None
@@ -258,7 +409,7 @@ def export_lesson(
         render_start = time.monotonic()
         frames_dir = work_dir / "frames"
         frame_count = _render_frames(
-            lesson, timeline, frames_dir, visual_timelines=visual_timelines
+            working_lesson, timeline, frames_dir, visual_timelines=visual_timelines
         )
         stage_seconds["scene_render"] = time.monotonic() - render_start
 
@@ -308,6 +459,7 @@ def export_lesson(
         _write_srt(captions_path, timeline)
         stage_seconds["total"] = time.monotonic() - total_start
         output_duration = float(media_info["duration_seconds"])
+        duration_within_tolerance = output_duration <= tolerance
         manifest = {
             "lesson_id": lesson.id,
             "topic": lesson.topic,
@@ -316,11 +468,19 @@ def export_lesson(
             "voice_language": language,
             "audio_sample_rate_hz": generated[0][1],
             "duration_seconds": output_duration,
+            "target_duration_seconds": target,
+            "duration_within_tolerance": duration_within_tolerance,
+            "speech_seconds": round(speech_seconds, 3),
+            "pause_seconds": round(total_pauses, 3),
+            "duration_corrections": duration_corrections,
             "dimensions": [media_info["width"], media_info["height"]],
             "frame_rate": media_info["frame_rate"],
             "video_codec": media_info["video_codec"],
             "audio_codec": media_info["audio_codec"],
-            "timing_basis": "Measured duration of each synthesized scene WAV plus the validated scene pause.",
+            "timing_basis": (
+                "Measured duration of each synthesized scene WAV plus the validated scene "
+                "pause; narration is budgeted against the requested target duration."
+            ),
             "stages_seconds": stage_seconds,
             "scenes": [
                 {
@@ -348,4 +508,9 @@ def export_lesson(
         audio_codec="aac",
         stage_seconds=stage_seconds,
         timeline=timeline,
+        target_duration_seconds=target,
+        within_tolerance=duration_within_tolerance,
+        duration_corrections=duration_corrections,
+        speech_seconds=speech_seconds,
+        pause_seconds=total_pauses,
     )

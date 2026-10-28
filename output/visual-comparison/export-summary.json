@@ -1,0 +1,146 @@
+[
+  {
+    "topic": "How does a Python loop work?",
+    "video": "output\\visual-comparison\\programming-loop.mp4",
+    "manifest": "output\\visual-comparison\\programming-loop.json",
+    "duration_seconds": 30.272,
+    "target_duration_seconds": 30,
+    "within_tolerance": true,
+    "dimensions": [
+      1280,
+      720
+    ],
+    "fps": 24,
+    "stages_seconds": {
+      "tts_initialization": 1.4059999999990396,
+      "narration": 0.0,
+      "tts_synthesis": 0.0,
+      "scene_render": 11.906000000002678,
+      "encode": 5.73399999999674,
+      "ffprobe_verification": 0.39100000000325963,
+      "total": 18.07800000000134
+    },
+    "scene_timing": [
+      {
+        "title": "One loop, one turn per item",
+        "visual_type": "title_card",
+        "start_seconds": 0.0,
+        "audio_seconds": 11.828,
+        "pause_seconds": 0.35,
+        "end_seconds": 12.177999999999999
+      },
+      {
+        "title": "Watch each pass update the output",
+        "visual_type": "code_execution",
+        "start_seconds": 12.177999999999999,
+        "audio_seconds": 10.698666666666666,
+        "pause_seconds": 0.35,
+        "end_seconds": 23.226666666666667
+      },
+      {
+        "title": "No next value means the loop stops",
+        "visual_type": "concept_diagram",
+        "start_seconds": 23.226666666666667,
+        "audio_seconds": 6.695333333333333,
+        "pause_seconds": 0.35,
+        "end_seconds": 30.272000000000002
+      }
+    ]
+  },
+  {
+    "topic": "How do fractions show parts of a whole?",
+    "video": "output\\visual-comparison\\fractions.mp4",
+    "manifest": "output\\visual-comparison\\fractions.json",
+    "duration_seconds": 29.977333,
+    "target_duration_seconds": 30,
+    "within_tolerance": true,
+    "dimensions": [
+      1280,
+      720
+    ],
+    "fps": 24,
+    "stages_seconds": {
+      "tts_initialization": 1.4059999999990396,
+      "narration": 46.56300000000192,
+      "tts_synthesis": 46.56300000000192,
+      "scene_render": 11.0,
+      "encode": 5.563000000001921,
+      "ffprobe_verification": 0.046999999998661224,
+      "total": 63.23500000000058
+    },
+    "scene_timing": [
+      {
+        "title": "Fractions divide one whole equally",
+        "visual_type": "title_card",
+        "start_seconds": 0.0,
+        "audio_seconds": 12.512,
+        "pause_seconds": 0.35,
+        "end_seconds": 12.862
+      },
+      {
+        "title": "Shade three of four equal parts",
+        "visual_type": "fraction_model",
+        "start_seconds": 12.862,
+        "audio_seconds": 9.534,
+        "pause_seconds": 0.35,
+        "end_seconds": 22.746000000000002
+      },
+      {
+        "title": "Read the numerator over the denominator",
+        "visual_type": "process_flow",
+        "start_seconds": 22.746000000000002,
+        "audio_seconds": 6.881333333333333,
+        "pause_seconds": 0.35,
+        "end_seconds": 29.977333333333338
+      }
+    ]
+  },
+  {
+    "topic": "How does photosynthesis work?",
+    "video": "output\\visual-comparison\\photosynthesis-progressive.mp4",
+    "manifest": "output\\visual-comparison\\photosynthesis-progressive.json",
+    "duration_seconds": 31.417958,
+    "target_duration_seconds": 30,
+    "within_tolerance": true,
+    "dimensions": [
+      1280,
+      720
+    ],
+    "fps": 24,
+    "stages_seconds": {
+      "tts_initialization": 1.3439999999973224,
+      "narration": 0.031000000002677552,
+      "tts_synthesis": 0.031000000002677552,
+      "scene_render": 14.40599999999904,
+      "encode": 6.265999999999622,
+      "ffprobe_verification": 0.0470000000022992,
+      "total": 20.7970000000023
+    },
+    "scene_timing": [
+      {
+        "title": "Plants use light to make sugars",
+        "visual_type": "title_card",
+        "start_seconds": 0.0,
+        "audio_seconds": 10.912,
+        "pause_seconds": 0.35,
+        "end_seconds": 11.262
+      },
+      {
+        "title": "Inputs enter; products leave",
+        "visual_type": "cause_effect",
+        "start_seconds": 11.262,
+        "audio_seconds": 9.812625,
+        "pause_seconds": 0.35,
+        "end_seconds": 21.424625000000002
+      },
+      {
+        "title": "Track the matter through the leaf",
+        "visual_type": "process_flow",
+        "start_seconds": 21.424625000000002,
+        "audio_seconds": 9.643333333333333,
+        "pause_seconds": 0.35,
+        "end_seconds": 31.41795833333334
+      }
+    ]
+  }
+]

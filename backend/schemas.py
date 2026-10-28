@@ -4,14 +4,19 @@ import keyword
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
-FallbackReason = Literal["unavailable", "timeout", "http_error", "invalid_output"]
+FallbackReason = Literal[
+    "unavailable", "timeout", "http_error", "invalid_output", "translation_unavailable"
+]
 VisualType = Literal[
+    "title_card",
     "concept",
     "flow",
     "code",
     "concept_diagram",
     "process_flow",
     "code_execution",
+    "fraction_model",
+    "cause_effect",
 ]
 
 
@@ -21,7 +26,7 @@ class LessonRequest(BaseModel):
     topic: str = Field(min_length=3, max_length=180)
     level: Literal["beginner", "intermediate"] = "beginner"
     language: Literal["en", "hi", "kn"] = "en"
-    duration_seconds: Literal[30, 60, 90] = 60
+    duration_seconds: Literal[30, 45, 60, 90] = 60
 
 
 class CodeExecutionData(BaseModel):
@@ -57,6 +62,53 @@ class CodeExecutionData(BaseModel):
         return clean
 
 
+class FractionModelData(BaseModel):
+    """A bounded equal-part area model; it contains numbers, never drawing code."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    numerator: int = Field(ge=1, le=8)
+    denominator: int = Field(ge=2, le=8)
+
+    @model_validator(mode="after")
+    def numerator_fits_whole(self) -> "FractionModelData":
+        if self.numerator > self.denominator:
+            raise ValueError("numerator cannot exceed the whole")
+        return self
+
+
+class CauseEffectData(BaseModel):
+    """Small, display-only labels for a built-in cause/effect demonstration."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    inputs: list[str] = Field(min_length=2, max_length=3)
+    mechanism: str = Field(min_length=1, max_length=48)
+    outputs: list[str] = Field(min_length=1, max_length=2)
+
+    @field_validator("inputs", "outputs")
+    @classmethod
+    def bound_labels(cls, labels: list[str]) -> list[str]:
+        clean = [label.strip() if isinstance(label, str) else label for label in labels]
+        if any(
+            not isinstance(label, str)
+            or not label
+            or len(label) > 48
+            or any(ord(char) < 32 for char in label)
+            for label in clean
+        ):
+            raise ValueError("cause/effect labels must be printable and at most 48 characters")
+        return clean
+
+    @field_validator("mechanism")
+    @classmethod
+    def bound_mechanism_label(cls, label: str) -> str:
+        label = label.strip()
+        if not label or any(ord(char) < 32 for char in label):
+            raise ValueError("mechanism must be printable text")
+        return label
+
+
 class Scene(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -66,6 +118,8 @@ class Scene(BaseModel):
     visual_type: VisualType = "concept"
     visual_data: dict[str, str] = Field(default_factory=dict)
     execution_data: CodeExecutionData | None = None
+    fraction_data: FractionModelData | None = None
+    cause_effect_data: CauseEffectData | None = None
     pause_seconds: float = Field(default=0.35, ge=0, le=1.5)
 
     @field_validator("title", "narration", "caption", mode="before")
@@ -95,6 +149,14 @@ class Scene(BaseModel):
             raise ValueError("code_execution scenes require bounded execution_data")
         if self.visual_type != "code_execution" and self.execution_data is not None:
             raise ValueError("execution_data is only valid for code_execution scenes")
+        if self.visual_type == "fraction_model" and self.fraction_data is None:
+            raise ValueError("fraction_model scenes require bounded fraction_data")
+        if self.visual_type != "fraction_model" and self.fraction_data is not None:
+            raise ValueError("fraction_data is only valid for fraction_model scenes")
+        if self.visual_type == "cause_effect" and self.cause_effect_data is None:
+            raise ValueError("cause_effect scenes require bounded cause_effect_data")
+        if self.visual_type != "cause_effect" and self.cause_effect_data is not None:
+            raise ValueError("cause_effect_data is only valid for cause_effect scenes")
         return self
 
 
@@ -113,7 +175,7 @@ class Lesson(BaseModel):
     topic: str
     level: Literal["beginner", "intermediate"]
     language: Literal["en", "hi", "kn"]
-    target_duration_seconds: Literal[30, 60, 90]
+    target_duration_seconds: Literal[30, 45, 60, 90]
     scenes: list[Scene] = Field(min_length=3, max_length=6)
     source: Literal["sample", "ollama"] = "sample"
     fallback: bool = False
@@ -145,6 +207,9 @@ class RenderJobResponse(BaseModel):
     status: Literal["queued", "rendering", "completed", "failed"]
     output_filename: str
     duration_seconds: float | None = None
+    target_duration_seconds: int | None = None
+    duration_within_tolerance: bool | None = None
+
     video_url: str | None = None
     download_url: str | None = None
     captions_url: str | None = None

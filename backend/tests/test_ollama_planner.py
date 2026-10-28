@@ -124,6 +124,52 @@ def test_invalid_visual_type_is_rejected_by_pydantic():
         planner_for(lambda data: output_for(data, visual_type="execute")).plan(request())
 
 
+def test_title_card_is_a_supported_structured_visual_type():
+    lesson = planner_for(lambda data: output_for(data, visual_type="title_card")).plan(request())
+
+    assert [scene.visual_type for scene in lesson.scenes] == ["title_card"] * 3
+
+
+def test_planner_accepts_bounded_fraction_model_data():
+    def structured_visuals(_data):
+        output = output_for({})
+        output["scenes"][1].update(
+            {
+                "visual_type": "fraction_model",
+                "fraction_data": {"numerator": 3, "denominator": 4},
+            }
+        )
+        return output
+
+    lesson = planner_for(structured_visuals).plan(request())
+
+    assert lesson.scenes[1].fraction_data is not None
+    assert lesson.scenes[1].fraction_data.numerator == 3
+
+
+def test_planner_accepts_bounded_cause_effect_data():
+    def structured_visuals(_data):
+        output = output_for({})
+        output["scenes"][1].update(
+            {
+                "visual_type": "cause_effect",
+                "cause_effect_data": {
+                    "inputs": ["sunlight", "water", "carbon dioxide"],
+                    "mechanism": "chloroplasts in a leaf",
+                    "outputs": ["glucose", "oxygen"],
+                },
+            }
+        )
+        return output
+
+    lesson = planner_for(structured_visuals).plan(
+        request("How does photosynthesis work?")
+    )
+
+    assert lesson.scenes[1].cause_effect_data is not None
+    assert lesson.scenes[1].cause_effect_data.inputs == ["sunlight", "water", "carbon dioxide"]
+
+
 @pytest.mark.parametrize("count", [2, 7])
 def test_scene_count_outside_three_to_six_is_rejected(count):
     with pytest.raises(OllamaInvalidOutputError, match="schema validation"):
@@ -211,7 +257,8 @@ def test_api_response_is_additive_and_reports_fallback_status(monkeypatch):
     assert body["source"] == "sample"
     assert body["fallback"] is True
     assert body["fallback_reason"] == "unavailable"
-    assert len(body["scenes"]) == 3
+    # 90-second fallback lessons include the recap scene (duration-aware samples).
+    assert len(body["scenes"]) == 4
     assert "lesson" not in body
 
 
@@ -254,3 +301,87 @@ def test_api_keeps_request_validation_and_health_fallback_contract(monkeypatch):
     assert health.status_code == 200
     assert health.json()["fallback_available"] is True
     assert health.json()["lesson_engine"] == "ollama_with_sample_fallback"
+
+
+def _planner_stub(language: str):
+    class StubPlanner:
+        def plan(self, lesson_request):
+            return Lesson(
+                id="ab12cd34ef56",
+                topic=lesson_request.topic,
+                level=lesson_request.level,
+                language=language,
+                target_duration_seconds=lesson_request.duration_seconds,
+                scenes=output_for({})["scenes"],
+                source="ollama",
+            )
+
+    return StubPlanner
+
+
+def test_translated_lesson_reports_ollama_source_without_fallback(monkeypatch):
+    class FakeTranslator:
+        def translate_lesson(self, lesson, language):
+            assert language == "kn"
+            scenes = [
+                scene.model_copy(update={
+                    "title": "ಶೀರ್ಷಿಕೆ",
+                    "narration": "ಕನ್ನಡ ವಿವರಣೆ.",
+                    "caption": "ಕನ್ನಡ ಶೀರ್ಷಿಕೆ",
+                })
+                for scene in lesson.scenes
+            ]
+            return lesson.model_copy(update={"scenes": scenes})
+
+    monkeypatch.setattr("backend.main.OllamaPlanner", _planner_stub("kn"))
+    monkeypatch.setattr("backend.main._build_translator", lambda: FakeTranslator())
+    response = TestClient(app).post(
+        "/api/lessons",
+        json={"topic": "Fractions for a beginner", "language": "kn"},
+    )
+
+    body = response.json()
+    assert response.status_code == 200
+    assert body["source"] == "ollama"
+    assert body["fallback"] is False
+    assert body["fallback_reason"] is None
+    assert body["scenes"][0]["title"] == "ಶೀರ್ಷಿಕೆ"
+
+
+def test_translation_failure_falls_back_to_sample_with_explicit_reason(monkeypatch):
+    from backend.services.translation_service import TranslationUnavailable
+
+    class FailingTranslator:
+        def translate_lesson(self, _lesson, _language):
+            raise TranslationUnavailable("model directory is missing")
+
+    monkeypatch.setattr("backend.main.OllamaPlanner", _planner_stub("hi"))
+    monkeypatch.setattr("backend.main._build_translator", lambda: FailingTranslator())
+    response = TestClient(app).post(
+        "/api/lessons",
+        json={"topic": "Fractions for a beginner", "language": "hi"},
+    )
+
+    body = response.json()
+    assert response.status_code == 200
+    assert body["source"] == "sample"
+    assert body["fallback"] is True
+    assert body["fallback_reason"] == "translation_unavailable"
+
+
+def test_english_requests_skip_translation_entirely(monkeypatch):
+    class UnexpectedTranslator:
+        def translate_lesson(self, _lesson, _language):
+            raise AssertionError("English lessons must not be translated.")
+
+    monkeypatch.setattr("backend.main.OllamaPlanner", _planner_stub("en"))
+    monkeypatch.setattr("backend.main._build_translator", lambda: UnexpectedTranslator())
+    response = TestClient(app).post(
+        "/api/lessons",
+        json={"topic": "Fractions for a beginner", "language": "en"},
+    )
+
+    body = response.json()
+    assert response.status_code == 200
+    assert body["source"] == "ollama"
+    assert body["scenes"][0]["title"].startswith("Scene 1")

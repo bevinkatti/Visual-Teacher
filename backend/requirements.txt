@@ -7,3 +7,10 @@ numpy==2.5.4
 Pillow==13.0.0
 soundfile==0.14.0
 pytest==9.1.1
+torch==2.14.1
+transformers==4.46.1
+sentencepiece==0.2.2
+sacremoses==0.2.0
+IndicTransToolkit==1.1.1
+huggingface_hub==2.3.0
+parler-tts @ git+https://github.com/huggingface/parler-tts.git@d108732cd57788ec86bc857d99a6cabd66663d68

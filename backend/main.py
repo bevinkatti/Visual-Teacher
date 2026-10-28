@@ -1,13 +1,16 @@
 import logging
 import os
+import time
+from threading import Lock
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
 from backend.schemas import Lesson, LessonRequest, RenderJobResponse
-from backend.services.lesson_service import build_sample_lesson
+from backend.services.lesson_service import build_sample_lesson_with_pool
 from backend.services.ollama_planner import OllamaPlanner, OllamaPlannerError
+from backend.services.translation_service import TranslationUnavailable
 from backend.services.render_jobs import (
     RenderJobManager,
     RenderJobNotFound,
@@ -46,18 +49,61 @@ def health():
     }
 
 
+_translator = None
+_translator_lock = Lock()
+
+
+def _build_translator():
+    """One shared translator instance; loading IndicTrans2 costs about 9 seconds."""
+    global _translator
+    with _translator_lock:
+        if _translator is None:
+            from backend.services.translation_service import LessonTranslator
+
+            _translator = LessonTranslator()
+        return _translator
+
+
 @app.post("/api/lessons", response_model=Lesson)
 def create_lesson(request: LessonRequest):
+    planning_start = time.monotonic()
     try:
         lesson = OllamaPlanner().plan(request)
+        upstream_stage_seconds = {"planning": time.monotonic() - planning_start}
     except OllamaPlannerError as exc:
         logger.warning(
             "Ollama lesson planning failed (%s): %s; returning the deterministic sample fallback.",
             exc.reason,
             exc,
         )
-        lesson = build_sample_lesson(request, fallback_reason=exc.reason)
-    render_jobs.register_lesson(lesson)
+        lesson, grow_pool = build_sample_lesson_with_pool(request, fallback_reason=exc.reason)
+        render_jobs.register_lesson(
+            lesson,
+            upstream_stage_seconds={"planning": time.monotonic() - planning_start},
+            grow_pool=grow_pool,
+        )
+        return lesson
+    if request.language != "en":
+        translation_start = time.monotonic()
+        try:
+            lesson = _build_translator().translate_lesson(lesson, request.language)
+            upstream_stage_seconds["translation"] = time.monotonic() - translation_start
+        except TranslationUnavailable as exc:
+            logger.warning(
+                "Local translation into %s failed (%s); returning the deterministic sample fallback.",
+                request.language,
+                exc,
+            )
+            lesson, grow_pool = build_sample_lesson_with_pool(
+                request, fallback_reason="translation_unavailable"
+            )
+            render_jobs.register_lesson(
+                lesson,
+                upstream_stage_seconds=upstream_stage_seconds,
+                grow_pool=grow_pool,
+            )
+            return lesson
+    render_jobs.register_lesson(lesson, upstream_stage_seconds=upstream_stage_seconds)
     return lesson
 
 

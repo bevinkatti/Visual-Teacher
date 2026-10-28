@@ -1,0 +1,10 @@
+parler-mr.wav | synth 80s | audio 6.5s | ए फॉर लूप यादीतील प्रत्येक मूल्यासाठी एका सूचनेची पुनरावृत्ती करते.
+parler-ta.wav | synth 58s | audio 5.9s | ஒரு பட்டியலில் உள்ள ஒவ்வொரு மதிப்பிற்கும் ஒரு கட்டளையை சுழற்சி மீண்டும் செய்கிறது.
+parler-te.wav | synth 56s | audio 5.9s | లూప్ కోసం a జాబితాలోని ప్రతి విలువకు ఒక సూచనను పునరావృతం చేస్తుంది.
+parler-bn.wav | synth 66s | audio 6.2s | একটি লুপের জন্য একটি তালিকা প্রতিটি মানের জন্য একটি নির্দেশের পুনরাবৃত্তি করে।
+parler-kn.wav | synth 1s | audio 6.8s | ಎ ಫಾರ್ ಲೂಪ್ ಪಟ್ಟಿಯಲ್ಲಿನ ಪ್ರತಿಯೊಂದು ಮೌಲ್ಯಕ್ಕೂ ಒಂದು ಸೂಚನೆಯನ್ನು ಪುನರಾವರ್ತಿಸುತ್ತದೆ.
+kokoro-en-hf_alpha.wav | English accent test
+kokoro-en-hf_beta.wav | English accent test
+kokoro-en-hm_omega.wav | English accent test
+kokoro-en-hm_psi.wav | English accent test
+kokoro-en-af_heart.wav | English accent test

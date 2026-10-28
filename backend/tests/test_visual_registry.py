@@ -1,7 +1,13 @@
 import pytest
 from pydantic import ValidationError
 
-from backend.schemas import CodeExecutionData, LessonRequest, Scene
+from backend.schemas import (
+    CauseEffectData,
+    CodeExecutionData,
+    FractionModelData,
+    LessonRequest,
+    Scene,
+)
 from backend.services.lesson_service import build_sample_lesson
 from backend.services.visual_registry import (
     build_code_execution_timeline,
@@ -83,6 +89,73 @@ def test_topic_selection_uses_code_execution_only_with_structured_program_data()
 def test_legacy_visual_types_resolve_to_current_renderer_registry_keys():
     lesson = build_sample_lesson(LessonRequest(topic="An arbitrary topic", duration_seconds=30))
 
-    assert renderer_key(lesson.scenes[0]) == "concept_diagram"
+    assert renderer_key(lesson.scenes[0]) == "title_card"
     assert renderer_key(lesson.scenes[1]) == "process_flow"
+
+
+def test_fraction_area_model_is_bounded_and_available_in_deterministic_sample():
+    scene = Scene(
+        title="Shade three equal parts",
+        narration="Three of four equal pieces make three fourths.",
+        caption="3 of 4 equal pieces are selected.",
+        visual_type="fraction_model",
+        fraction_data=FractionModelData(numerator=3, denominator=4),
+    )
+    assert renderer_key(scene) == "fraction_model"
+
+    lesson = build_sample_lesson(
+        LessonRequest(topic="How do fractions show parts of a whole?", duration_seconds=30)
+    )
+    fraction_scene = next(item for item in lesson.scenes if item.visual_type == "fraction_model")
+    assert fraction_scene.fraction_data == FractionModelData(numerator=3, denominator=4)
+
+    with pytest.raises(ValidationError):
+        FractionModelData(numerator=5, denominator=4)
+    with pytest.raises(ValidationError):
+        Scene(
+            title="Missing fraction data",
+            narration="This scene has no structured area model.",
+            caption="Invalid fraction scene.",
+            visual_type="fraction_model",
+        )
+
+
+def test_cause_effect_uses_bounded_inputs_mechanism_outputs():
+    lesson = build_sample_lesson(
+        LessonRequest(topic="How does photosynthesis work?", duration_seconds=30)
+    )
+    scene = next(item for item in lesson.scenes if item.visual_type == "cause_effect")
+    assert renderer_key(scene) == "cause_effect"
+    assert scene.cause_effect_data == CauseEffectData(
+        inputs=["sunlight", "water", "carbon dioxide"],
+        mechanism="chloroplasts in a leaf",
+        outputs=["glucose", "oxygen"],
+    )
+    assert "glucose" in scene.narration
+
+    with pytest.raises(ValidationError):
+        CauseEffectData(
+            inputs=["light"], mechanism="leaf", outputs=["sugar"]
+        )
+    with pytest.raises(ValidationError):
+        Scene(
+            title="Missing mechanism data",
+            narration="Inputs and outputs should be shown through a process.",
+            caption="Invalid cause and effect.",
+            visual_type="cause_effect",
+        )
+
+
+def test_translation_unavailable_keeps_the_existing_hindi_sample_fallback():
+    lesson = build_sample_lesson(
+        LessonRequest(
+            topic="How do fractions show parts of a whole?",
+            language="hi",
+            duration_seconds=30,
+        ),
+        fallback_reason="translation_unavailable",
+    )
+
+    assert any("भिन्न" in scene.title or "समझ" in scene.title for scene in lesson.scenes)
+    assert lesson.language == "hi"
 

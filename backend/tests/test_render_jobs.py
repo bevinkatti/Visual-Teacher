@@ -199,11 +199,12 @@ def test_hindi_render_routes_to_local_hindi_voice(tmp_path):
     manager.start(lesson.id)
     executor.run_next()
 
-    assert captured == {"voice": "hf_alpha", "language": "hi"}
+    assert captured["voice"] == "hf_alpha"
+    assert captured["language"] == "hi"
 
 
 @pytest.mark.parametrize("language, message", [
-    ("kn", "no local Kannada voice"),
+    ("kn", "not written in Kannada script"),
     ("hi", "not written in Hindi script"),
 ])
 def test_unavailable_or_wrong_script_voice_fails_explicitly(tmp_path, language, message, monkeypatch):
@@ -222,3 +223,41 @@ def test_unavailable_or_wrong_script_voice_fails_explicitly(tmp_path, language, 
         manager.start(lesson.id)
     assert response.status_code == 422
     assert message in response.json()["detail"]
+
+
+def test_kannada_render_routes_to_indic_narrator(tmp_path):
+    executor = ManualExecutor()
+    captured = {}
+
+    class FakeIndicNarrator:
+        """Distinct type so the test can prove which narrator was selected."""
+
+    def capture_export(lesson, narrator, output_path, **kwargs):
+        captured["narrator"] = narrator
+        captured.update(kwargs)
+        return fake_exporter(lesson, narrator, output_path)
+
+    manager = RenderJobManager(
+        media_dir=tmp_path / "safe-media",
+        exporter=capture_export,
+        narrator_factory=object,
+        indic_narrator_factory=FakeIndicNarrator,
+        executor=executor,
+    )
+    kannada_scenes = [
+        scene.model_copy(update={
+            "title": "ಲೂಪ್ ಪರಿಚಯ",
+            "narration": "ಲೂಪ್ ಪ್ರತಿ ಹಣ್ಣಿಗೂ ಒಂದು ಸೂಚನೆ ಚಲಾಯಿಸುತ್ತದೆ.",
+            "caption": "ಪ್ರತಿ ಹಣ್ಣನ್ನು ಒಮ್ಮೆ ನೋಡಿ.",
+        })
+        for scene in sample_lesson().scenes
+    ]
+    lesson = sample_lesson().model_copy(update={"language": "kn", "scenes": kannada_scenes})
+    manager.register_lesson(lesson)
+
+    manager.start(lesson.id)
+    executor.run_next()
+
+    assert isinstance(captured["narrator"], FakeIndicNarrator)
+    assert captured["language"] == "kn"
+    assert isinstance(captured["voice"], str) and captured["voice"]

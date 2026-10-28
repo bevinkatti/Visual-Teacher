@@ -1,0 +1,11 @@
+1
+00:00:00,000 --> 00:00:10,912
+Follow the inputs into the leaf and the products back out.
+
+2
+00:00:11,262 --> 00:00:21,075
+Light, water, and carbon dioxide lead to glucose and oxygen.
+
+3
+00:00:21,425 --> 00:00:31,068
+Carbon dioxide and water become glucose; oxygen is released.
